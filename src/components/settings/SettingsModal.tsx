@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { X, FolderOpen, Download, Upload, RotateCcw } from 'lucide-react'
-import { useSettings, useUpdateSettings } from '@/hooks/useSettings'
+import { X, FolderOpen, Download, Upload, RotateCcw, RefreshCw, ShieldCheck, ShieldAlert, TerminalSquare } from 'lucide-react'
+import { useSettings, useUpdateSettings, useWrapperPathDiagnostics } from '@/hooks/useSettings'
 import { useI18n } from '@/lib/i18n'
 import { useToastStore } from '@/hooks/useToast'
-import type { AppTheme } from '@/lib/types'
+import type { AppTheme, ClaudeBinaryVerification } from '@/lib/types'
+import { open } from '@tauri-apps/plugin-shell'
+import { detectClaudeBinary, verifyClaudeBinary } from '@/lib/api'
 
 interface SettingsModalProps {
   onClose: () => void
@@ -12,6 +14,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ onClose }: SettingsModalProps) {
   const { data: settings } = useSettings()
+  const { data: wrapperPathDiagnostics, isFetching: isCheckingWrapperPath } = useWrapperPathDiagnostics(Boolean(settings))
   const updateSettings = useUpdateSettings()
   const { language, setLanguage, t } = useI18n()
   const { addToast } = useToastStore()
@@ -19,14 +22,52 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [theme, setTheme] = useState(settings?.theme ?? 'system')
   const [startProxyOnLaunch, setStartProxyOnLaunch] = useState(settings?.startProxyOnLaunch ?? true)
   const [startAppOnLogin, setStartAppOnLogin] = useState(settings?.startAppOnLogin ?? false)
+  const [claudeBinaryPath, setClaudeBinaryPath] = useState(settings?.claudeBinaryPath ?? '')
+  const [isDetectingClaude, setIsDetectingClaude] = useState(false)
+  const [isVerifyingClaude, setIsVerifyingClaude] = useState(false)
+  const [verification, setVerification] = useState<ClaudeBinaryVerification | null>(null)
 
   useEffect(() => {
     if (settings) {
       setTheme(settings.theme)
       setStartProxyOnLaunch(settings.startProxyOnLaunch)
       setStartAppOnLogin(settings.startAppOnLogin)
+      setClaudeBinaryPath(settings.claudeBinaryPath ?? '')
+      setVerification(null)
     }
   }, [settings])
+
+  const handleDetectClaudeBinary = async () => {
+    try {
+      setIsDetectingClaude(true)
+      const result = await detectClaudeBinary()
+
+      if (result.found && result.path) {
+        setClaudeBinaryPath(result.path)
+        addToast('success', t('settings.binaryDetected'))
+      } else {
+        addToast('error', t('settings.binaryNotFound'))
+      }
+    } catch {
+      addToast('error', t('error.generic'))
+    } finally {
+      setIsDetectingClaude(false)
+    }
+  }
+
+  const handleVerifyClaudeBinary = async () => {
+    try {
+      setIsVerifyingClaude(true)
+      const result = await verifyClaudeBinary(claudeBinaryPath)
+      setVerification(result)
+
+      addToast(result.runnable ? 'success' : 'error', result.message)
+    } catch {
+      addToast('error', t('error.generic'))
+    } finally {
+      setIsVerifyingClaude(false)
+    }
+  }
 
   const handleSave = async () => {
     try {
@@ -34,6 +75,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         theme: theme as AppTheme,
         startProxyOnLaunch,
         startAppOnLogin,
+        claudeBinaryPath,
       })
       addToast('success', t('settings.settings') + ' ' + t('profile.saved').toLowerCase())
       onClose()
@@ -167,23 +209,136 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 <div className="flex gap-2">
                   <input
                     className="input flex-1"
-                    defaultValue={settings?.claudeBinaryPath}
-                    placeholder="Auto-detected"
+                    value={claudeBinaryPath}
+                    onChange={(e) => setClaudeBinaryPath(e.target.value)}
+                    placeholder={t('settings.claudeBinaryHint')}
                   />
-                  <button className="btn-secondary flex items-center gap-2" type="button">
-                    <FolderOpen className="w-4 h-4" />
-                    Browse
+                  <button
+                    className="btn-secondary flex items-center gap-2"
+                    type="button"
+                    onClick={handleDetectClaudeBinary}
+                    disabled={isDetectingClaude}
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isDetectingClaude ? 'animate-spin' : ''}`} />
+                    {isDetectingClaude ? t('settings.detecting') : t('settings.detect')}
+                  </button>
+                  <button
+                    className="btn-secondary flex items-center gap-2"
+                    type="button"
+                    onClick={handleVerifyClaudeBinary}
+                    disabled={isVerifyingClaude}
+                  >
+                    <ShieldCheck className={`w-4 h-4 ${isVerifyingClaude ? 'animate-pulse' : ''}`} />
+                    {isVerifyingClaude ? t('settings.verifying') : t('settings.verify')}
                   </button>
                 </div>
+                <div className="mt-2 flex justify-end">
+                  <button
+                    className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                    type="button"
+                    onClick={() => setClaudeBinaryPath('')}
+                  >
+                    {t('settings.useAutoDetect')}
+                  </button>
+                </div>
+                {verification && (
+                  <div
+                    className={`mt-3 rounded-lg border p-3 text-sm ${
+                      verification.runnable
+                        ? 'border-[var(--success)]/20 bg-[var(--success)]/10 text-[var(--success)]'
+                        : 'border-[var(--error)]/20 bg-[var(--error)]/10 text-[var(--error)]'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {verification.runnable ? (
+                        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                      ) : (
+                        <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                      )}
+                      <div className="min-w-0 space-y-1">
+                        <p className="font-medium break-words">{verification.message}</p>
+                        {verification.resolvedPath && (
+                          <p className="break-all text-xs opacity-90">
+                            {t('settings.verifyResolvedPath')}: {verification.resolvedPath}
+                          </p>
+                        )}
+                        <p className="text-xs opacity-90">
+                          {t('settings.verifySource')}: {verification.source}
+                        </p>
+                        {verification.version && (
+                          <p className="break-words text-xs opacity-90">
+                            {t('settings.verifyVersion')}: {verification.version}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
                 <label className="label">{t('settings.wrapperDir')}</label>
-                <input
-                  className="input"
-                  value={settings?.wrapperDir ?? '~/.local/bin'}
-                  readOnly
-                />
+                <div className="flex gap-2">
+                  <input
+                    className="input flex-1"
+                    value={settings?.wrapperDir ?? '%LOCALAPPDATA%\\Clair\\bin'}
+                    readOnly
+                  />
+                  <button
+                    className="btn-secondary flex items-center gap-2"
+                    type="button"
+                    onClick={() => {
+                      if (settings?.wrapperDir) {
+                        open(settings.wrapperDir).catch(() => {})
+                      }
+                    }}
+                    disabled={!settings?.wrapperDir}
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                    {t('settings.openDir')}
+                  </button>
+                </div>
+                {wrapperPathDiagnostics && (
+                  <div
+                    className={`mt-3 rounded-lg border p-3 text-sm ${
+                      wrapperPathDiagnostics.inPath
+                        ? 'border-[var(--success)]/20 bg-[var(--success)]/10 text-[var(--success)]'
+                        : 'border-amber-500/20 bg-amber-500/10 text-amber-700'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <TerminalSquare className="mt-0.5 h-4 w-4 shrink-0" />
+                      <div className="min-w-0 space-y-1">
+                        <p className="font-medium">
+                          {wrapperPathDiagnostics.inPath
+                            ? t('settings.wrapperDirInPath')
+                            : t('settings.wrapperDirNotInPath')}
+                        </p>
+                        <p className="break-all text-xs opacity-90">
+                          {t('settings.verifyResolvedPath')}: {wrapperPathDiagnostics.resolvedDir}
+                        </p>
+                        {wrapperPathDiagnostics.matchingEntries.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-xs opacity-90">{t('settings.pathMatches')}</p>
+                            {wrapperPathDiagnostics.matchingEntries.slice(0, 3).map((entry) => (
+                              <p key={entry} className="break-all text-xs opacity-90">
+                                {entry}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                        {!wrapperPathDiagnostics.inPath && (
+                          <p className="text-xs opacity-90">
+                            {t('settings.wrapperDirPathHint')}
+                          </p>
+                        )}
+                        {isCheckingWrapperPath && (
+                          <p className="text-xs opacity-90">{t('settings.checkingPath')}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </section>

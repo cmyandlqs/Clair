@@ -8,7 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Architecture: Claude Code → Clair local proxy (127.0.0.1:28789) → Multiple Provider backends
 
-Users generate wrapper scripts (e.g., `claude-glm`, `claude-minimax`) that set environment variables to route requests through Clair's local proxy.
+Windows mainline now uses per-profile `--settings` launchers, not pure env-only wrappers.
+Each generated launcher (for example `claude-glm.cmd`) starts:
+
+`claude.exe --settings <generated-profile-settings.json>`
+
+The generated settings file points Claude at Clair's local proxy and carries the profile model mapping. This avoids mutating the user's global `%USERPROFILE%\.claude\settings.json` while keeping shared skills/plugins/hooks available.
 
 ## Tech Stack
 
@@ -87,7 +92,7 @@ clair/
 1. **Provider Management**: CRUD for API providers (Anthropic-compatible, OpenAI-compatible)
 2. **Profile Management**: Route path + command name + model override per Provider
 3. **Local Proxy**: HTTP proxy on 127.0.0.1:18789 routing to upstream providers
-4. **Wrapper Generation**: Shell scripts in ~/.local/bin/claude-* with env vars
+4. **Launcher Generation**: Windows `.cmd` launchers in `%LOCALAPPDATA%\Clair\bin` plus per-profile settings files in `%LOCALAPPDATA%\Clair\bin\profiles`
 5. **Streaming**: SSE response passthrough from providers
 
 ## Development Commands
@@ -129,6 +134,7 @@ SQLite database with tables:
 - [doc/frontend-dev.md](doc/frontend-dev.md) - Frontend implementation with design system
 - [doc/backend-dev.md](doc/backend-dev.md) - Backend Rust modules guide
 - [doc/test.md](doc/test.md) - 31 test cases + acceptance criteria
+- [doc/windows-profile-settings-strategy.md](doc/windows-profile-settings-strategy.md) - Windows `--settings` launcher strategy and validation notes
 
 ## Code Conventions
 

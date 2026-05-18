@@ -322,6 +322,12 @@ impl Database {
         Ok(())
     }
 
+    pub fn delete_setting(&self, key: &str) -> rusqlite::Result<()> {
+        let conn = self.connection();
+        conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
     pub fn get_all_settings(&self) -> rusqlite::Result<HashMap<String, String>> {
         let conn = self.connection();
         let mut stmt = conn.prepare("SELECT key, value FROM settings")?;

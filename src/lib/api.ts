@@ -11,7 +11,9 @@ import type {
   TestProfileResult,
   ProxyEvidenceEntry,
   WrapperStatus,
+  WrapperPathDiagnostics,
   ClaudeBinaryDetection,
+  ClaudeBinaryVerification,
   GenerateWrapperResult,
 } from './types'
 
@@ -131,6 +133,8 @@ function convertWrapperStatusFromBackend(status: Record<string, unknown>): Wrapp
     path: status.path as string | undefined,
     inPath: status.in_path as boolean,
     stale: status.stale as boolean,
+    settingsPath: status.settings_path as string | undefined,
+    settingsExists: status.settings_exists as boolean,
   }
 }
 
@@ -140,6 +144,7 @@ function convertGenerateWrapperResultFromBackend(
   return {
     success: result.success as boolean,
     path: result.path as string,
+    settingsPath: result.settings_path as string | undefined,
     commandName: result.command_name as string,
   }
 }
@@ -414,6 +419,21 @@ export async function detectClaudeBinary(): Promise<ClaudeBinaryDetection> {
   return invoke('detect_claude_binary')
 }
 
+export async function verifyClaudeBinary(path?: string): Promise<ClaudeBinaryVerification> {
+  const result = await invoke<Record<string, unknown>>('verify_claude_binary', {
+    path: path && path.trim().length > 0 ? path.trim() : null,
+  })
+
+  return {
+    configuredPath: result.configured_path as string | undefined,
+    resolvedPath: result.resolved_path as string | undefined,
+    source: result.source as string,
+    runnable: result.runnable as boolean,
+    version: result.version as string | undefined,
+    message: result.message as string,
+  }
+}
+
 export async function generateWrapper(profileId: string): Promise<GenerateWrapperResult> {
   const result = await invoke<Record<string, unknown>>('generate_wrapper', {
     profileId,
@@ -431,6 +451,20 @@ export async function checkWrapperStatus(profileId: string): Promise<WrapperStat
     profileId,
   })
   return convertWrapperStatusFromBackend(result)
+}
+
+export async function getWrapperPathDiagnostics(): Promise<WrapperPathDiagnostics> {
+  const result = await invoke<Record<string, unknown>>('get_wrapper_path_diagnostics')
+  const matchingEntries = (result.matching_entries as string[] | undefined) ?? []
+  const pathEntries = (result.path_entries as string[] | undefined) ?? []
+
+  return {
+    configuredDir: result.configured_dir as string,
+    resolvedDir: result.resolved_dir as string,
+    inPath: result.in_path as boolean,
+    matchingEntries,
+    pathEntries,
+  }
 }
 
 // ============ Settings Commands ============

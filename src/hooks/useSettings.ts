@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getSettings, updateSettings } from '@/lib/api'
+import { getSettings, getWrapperPathDiagnostics, updateSettings } from '@/lib/api'
 import type { AppSettings } from '@/lib/types'
 
 export function useSettings() {
@@ -16,6 +16,15 @@ export function useUpdateSettings() {
     mutationFn: (input: Partial<AppSettings>) => updateSettings(input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] })
+      queryClient.invalidateQueries({ queryKey: ['wrapperPathDiagnostics'] })
     },
+  })
+}
+
+export function useWrapperPathDiagnostics(enabled = true) {
+  return useQuery({
+    queryKey: ['wrapperPathDiagnostics'],
+    queryFn: getWrapperPathDiagnostics,
+    enabled,
   })
 }

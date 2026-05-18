@@ -6,6 +6,7 @@ import {
   deleteProfile,
   setDefaultProfile,
   generateWrapper,
+  checkWrapperStatus,
   testProfile,
   reloadProxyConfig,
 } from '@/lib/api'
@@ -68,8 +69,22 @@ export function useSetDefaultProfile() {
 }
 
 export function useGenerateWrapper() {
+  const queryClient = useQueryClient()
+
   return useMutation({
     mutationFn: (profileId: string) => generateWrapper(profileId),
+    onSuccess: (_, profileId) => {
+      queryClient.invalidateQueries({ queryKey: ['wrapperStatus', profileId] })
+    },
+  })
+}
+
+export function useWrapperStatus(profileId?: string) {
+  return useQuery({
+    queryKey: ['wrapperStatus', profileId],
+    queryFn: () => checkWrapperStatus(profileId!),
+    enabled: Boolean(profileId),
+    refetchInterval: 5000,
   })
 }
 

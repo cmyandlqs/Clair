@@ -1,11 +1,12 @@
-import { Copy, RefreshCw, FileCode, Plus, Zap, CheckCircle, XCircle } from 'lucide-react'
+import { Copy, RefreshCw, FileCode, Plus, Zap, CheckCircle, XCircle, FolderOpen } from 'lucide-react'
 import { useProviders, useTestProvider, useUpdateProvider } from '@/hooks/useProviders'
-import { useProfiles, useGenerateWrapper, useTestProfile } from '@/hooks/useProfiles'
+import { useProfiles, useGenerateWrapper, useTestProfile, useWrapperStatus } from '@/hooks/useProfiles'
 import { useProxyStatus, useProxyEvidence } from '@/hooks/useProxyStatus'
 import { useUIStore } from '@/hooks/useUIStore'
 import { useState } from 'react'
 import { Badge } from '../common/Badge'
 import { useI18n } from '@/lib/i18n'
+import { open } from '@tauri-apps/plugin-shell'
 
 export function DetailPanel() {
   const { selectedProfileId, selectedProviderId, openModal } = useUIStore()
@@ -13,6 +14,7 @@ export function DetailPanel() {
   const { data: profiles = [] } = useProfiles()
   const { data: proxyStatus } = useProxyStatus()
   const { data: proxyEvidence = [] } = useProxyEvidence(30)
+  const { data: wrapperStatus } = useWrapperStatus(selectedProfileId ?? undefined)
   const testProvider = useTestProvider()
   const testProfile = useTestProfile()
   const updateProvider = useUpdateProvider()
@@ -39,7 +41,8 @@ export function DetailPanel() {
     try {
       setWrapperResult(null)
       const result = await generateWrapper.mutateAsync(profileId)
-      setWrapperResult({ success: true, message: `Generated: ${result.path}` })
+      const details = result.settingsPath ? `${result.path} | ${result.settingsPath}` : result.path
+      setWrapperResult({ success: true, message: `Generated: ${details}` })
     } catch (error) {
       setWrapperResult({ success: false, message: `Failed: ${error}` })
     }
@@ -87,6 +90,9 @@ export function DetailPanel() {
       .filter((entry) => entry.routePath === selectedProfile.routePath)
       .slice(-5)
       .reverse()
+    const launcherPath = wrapperStatus?.path
+    const profileSettingsPath = wrapperStatus?.settingsPath
+    const launcherDir = launcherPath ? launcherPath.replace(/[\\/][^\\/]+$/, '') : undefined
 
     return (
       <aside className="w-80 border-l border-[var(--border)] bg-[var(--surface)] overflow-auto">
@@ -119,6 +125,24 @@ export function DetailPanel() {
             </div>
           </div>
 
+          {launcherPath && (
+            <div>
+              <label className="label">{t('detail.launcherPath')}</label>
+              <p className="font-mono text-xs bg-[var(--surface-muted)] px-3 py-2 rounded-lg break-all">
+                {launcherPath}
+              </p>
+            </div>
+          )}
+
+          {profileSettingsPath && (
+            <div>
+              <label className="label">{t('detail.profileSettingsPath')}</label>
+              <p className="font-mono text-xs bg-[var(--surface-muted)] px-3 py-2 rounded-lg break-all">
+                {profileSettingsPath}
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="label">{t('detail.provider')}</label>
             <p>{provider?.name ?? 'Unknown'} · {selectedProfile.model}</p>
@@ -147,6 +171,19 @@ export function DetailPanel() {
                 {wrapperResult.message}
               </div>
             )}
+            {wrapperStatus && (
+              <div className={`mb-3 p-2 rounded-lg text-sm ${
+                wrapperStatus.exists && !wrapperStatus.stale
+                  ? 'bg-[var(--success)]/10 text-[var(--success)]'
+                  : 'bg-amber-500/10 text-amber-700'
+              }`}>
+                {wrapperStatus.exists
+                  ? wrapperStatus.stale
+                    ? t('detail.wrapperStale')
+                    : t('detail.wrapperReady')
+                  : t('detail.wrapperMissing')}
+              </div>
+            )}
             <button
               onClick={() => {
                 navigator.clipboard.writeText(selectedProfile.commandName)
@@ -155,6 +192,42 @@ export function DetailPanel() {
             >
               <Copy className="w-4 h-4" />
               {t('detail.copyCommand')}
+            </button>
+            <button
+              onClick={() => {
+                if (launcherPath) {
+                  navigator.clipboard.writeText(launcherPath)
+                }
+              }}
+              disabled={!launcherPath}
+              className="w-full btn-secondary mt-2 flex items-center justify-center gap-2"
+            >
+              <Copy className="w-4 h-4" />
+              {t('detail.copyLauncherPath')}
+            </button>
+            <button
+              onClick={() => {
+                if (profileSettingsPath) {
+                  navigator.clipboard.writeText(profileSettingsPath)
+                }
+              }}
+              disabled={!profileSettingsPath}
+              className="w-full btn-secondary mt-2 flex items-center justify-center gap-2"
+            >
+              <Copy className="w-4 h-4" />
+              {t('detail.copyProfileSettingsPath')}
+            </button>
+            <button
+              onClick={() => {
+                if (launcherDir) {
+                  open(launcherDir).catch(() => {})
+                }
+              }}
+              disabled={!launcherDir}
+              className="w-full btn-secondary mt-2 flex items-center justify-center gap-2"
+            >
+              <FolderOpen className="w-4 h-4" />
+              {t('detail.openLauncherDir')}
             </button>
             <button
               onClick={() => handleGenerateWrapper(selectedProfile.id)}

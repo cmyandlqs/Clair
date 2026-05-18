@@ -22,15 +22,30 @@ impl Default for AppSettings {
             start_proxy_on_launch: true,
             start_app_on_login: false,
             minimize_to_tray: true,
-            wrapper_dir: dirs::home_dir()
-                .map(|p| p.join(".local/bin").to_string_lossy().to_string())
-                .unwrap_or_else(|| "~/.local/bin".to_string()),
+            wrapper_dir: default_wrapper_dir(),
             claude_binary_path: None,
             theme: "system".to_string(),
         }
     }
 }
 
+#[cfg(windows)]
+fn default_wrapper_dir() -> String {
+    dirs::data_local_dir()
+        .map(|p| p.join("Clair").join("bin").to_string_lossy().to_string())
+        .unwrap_or_else(|| "%LOCALAPPDATA%\\Clair\\bin".to_string())
+}
+
+#[cfg(not(windows))]
+fn default_wrapper_dir() -> String {
+    dirs::home_dir()
+        .map(|p| p.join(".local/bin").to_string_lossy().to_string())
+        .unwrap_or_else(|| "~/.local/bin".to_string())
+}
+
 fn generate_local_token() -> String {
-    format!("clair-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap())
+    format!(
+        "clair-{}",
+        uuid::Uuid::new_v4().to_string().split('-').next().unwrap()
+    )
 }
