@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { X, TestTube } from 'lucide-react'
 import { useForm } from 'react-hook-form'
@@ -31,6 +31,7 @@ export function EditProviderModal({ onClose, providerId }: EditProviderModalProp
     handleSubmit,
     formState: { errors },
     getValues,
+    reset,
     trigger,
   } = useForm<ProviderFormData>({
     resolver: zodResolver(providerSchema),
@@ -45,6 +46,21 @@ export function EditProviderModal({ onClose, providerId }: EditProviderModalProp
       notes: provider?.notes,
     },
   })
+
+  useEffect(() => {
+    if (provider) {
+      reset({
+        name: provider.name,
+        type: provider.type,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        authScheme: provider.authScheme,
+        defaultModel: provider.defaultModel,
+        enableStreaming: provider.enableStreaming,
+        notes: provider.notes,
+      })
+    }
+  }, [provider, reset])
 
   const onSubmit = async (data: ProviderFormData) => {
     try {

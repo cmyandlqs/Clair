@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { X } from 'lucide-react'
 import { useForm } from 'react-hook-form'
@@ -27,6 +28,7 @@ export function EditProfileModal({ onClose, profileId }: EditProfileModalProps) 
     register,
     handleSubmit,
     formState: { errors },
+    reset,
   } = useForm<ProfileFormData>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
@@ -39,6 +41,20 @@ export function EditProfileModal({ onClose, profileId }: EditProfileModalProps) 
       wrapperEnabled: profile?.wrapperEnabled ?? true,
     },
   })
+
+  useEffect(() => {
+    if (profile) {
+      reset({
+        name: profile.name,
+        routePath: profile.routePath,
+        providerId: profile.providerId,
+        model: profile.model,
+        commandName: profile.commandName,
+        isDefault: profile.isDefault,
+        wrapperEnabled: profile.wrapperEnabled,
+      })
+    }
+  }, [profile, reset])
 
   const onSubmit = async (data: ProfileFormData) => {
     try {

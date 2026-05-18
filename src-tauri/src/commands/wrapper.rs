@@ -1,7 +1,7 @@
 use crate::db::Database;
-use crate::services::ClaudeDetectService;
 use crate::services::claude_detect_service::ClaudeBinaryDetection;
 use crate::services::wrapper_service::WrapperStatus;
+use crate::services::ClaudeDetectService;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -22,7 +22,8 @@ pub async fn generate_wrapper(
     profile_id: String,
 ) -> Result<GenerateWrapperResult, String> {
     let profiles = db.list_profiles().map_err(|e| e.to_string())?;
-    let profile = profiles.into_iter()
+    let profile = profiles
+        .into_iter()
         .find(|p| p.id == profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
@@ -72,9 +73,10 @@ pub async fn check_wrapper_status(
     profile_id: String,
 ) -> Result<WrapperStatus, String> {
     let profiles = db.list_profiles().map_err(|e| e.to_string())?;
-    let profile = profiles.into_iter()
+    let profile = profiles
+        .into_iter()
         .find(|p| p.id == profile_id)
         .ok_or_else(|| "Profile not found".to_string())?;
 
-    crate::services::wrapper_service::WrapperService::check_status(&profile)
+    crate::services::wrapper_service::WrapperService::check_status(&db, &profile)
 }

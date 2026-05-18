@@ -9,7 +9,7 @@ interface ProviderCardProps {
   selected: boolean
   profileCount: number
   onSelect: () => void
-  onTest: () => void
+  onTest: () => void | Promise<void>
   onEdit: () => void
   onCreateProfile: () => void
 }

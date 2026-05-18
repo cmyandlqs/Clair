@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { X } from 'lucide-react'
 import { useForm } from 'react-hook-form'
@@ -50,6 +51,12 @@ export function AddProfileModal({ onClose }: AddProfileModalProps) {
   }
 
   const selectedProvider = providers.find((p) => p.id === providerId)
+
+  useEffect(() => {
+    if (selectedProvider) {
+      setValue('model', selectedProvider.defaultModel, { shouldValidate: true })
+    }
+  }, [selectedProvider, setValue])
 
   const onSubmit = async (data: ProfileFormData) => {
     try {
@@ -139,12 +146,11 @@ export function AddProfileModal({ onClose }: AddProfileModalProps) {
 
             <div>
               <label className="label">{t('profile.model')}</label>
-              <input
-                {...register('model')}
-                className="input"
-                placeholder={selectedProvider?.defaultModel ?? 'glm-4'}
-                defaultValue={selectedProvider?.defaultModel}
-              />
+                <input
+                  {...register('model')}
+                  className="input"
+                  placeholder={selectedProvider?.defaultModel ?? 'glm-4'}
+                />
               {errors.model && (
                 <p className="text-sm text-[var(--error)] mt-1">{errors.model.message}</p>
               )}

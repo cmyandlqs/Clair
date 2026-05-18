@@ -27,6 +27,7 @@ export type CreateProviderInput = {
 export type UpdateProviderInput = {
   id: string
   name?: string
+  type?: 'anthropic_compatible' | 'openai_compatible' | 'custom'
   baseUrl?: string
   apiKey?: string
   authScheme?: 'x_api_key' | 'bearer'
@@ -92,6 +93,55 @@ function convertProfileFromBackend(p: Record<string, unknown>): Profile {
   }
 }
 
+function convertSettingsFromBackend(settings: Record<string, unknown>): AppSettings {
+  return {
+    proxyHost: settings.proxy_host as string,
+    proxyPort: settings.proxy_port as number,
+    proxyAuthToken: settings.proxy_auth_token as string,
+    startProxyOnLaunch: settings.start_proxy_on_launch as boolean,
+    startAppOnLogin: settings.start_app_on_login as boolean,
+    minimizeToTray: settings.minimize_to_tray as boolean,
+    wrapperDir: settings.wrapper_dir as string,
+    claudeBinaryPath: settings.claude_binary_path as string | undefined,
+    theme: settings.theme as AppSettings['theme'],
+  }
+}
+
+function convertProxyStatusFromBackend(status: Record<string, unknown>): ProxyStatus {
+  const activeRoutes = (status.active_routes as Record<string, unknown>[] | undefined) ?? []
+
+  return {
+    running: status.running as boolean,
+    host: status.host as string,
+    port: status.port as number,
+    activeRoutes: activeRoutes.map((route) => ({
+      routePath: route.route_path as string,
+      profileName: route.profile_name as string,
+      providerName: route.provider_name as string,
+    })),
+  }
+}
+
+function convertWrapperStatusFromBackend(status: Record<string, unknown>): WrapperStatus {
+  return {
+    exists: status.exists as boolean,
+    executable: status.executable as boolean,
+    path: status.path as string | undefined,
+    inPath: status.in_path as boolean,
+    stale: status.stale as boolean,
+  }
+}
+
+function convertGenerateWrapperResultFromBackend(
+  result: Record<string, unknown>
+): GenerateWrapperResult {
+  return {
+    success: result.success as boolean,
+    path: result.path as string,
+    commandName: result.command_name as string,
+  }
+}
+
 // ============ Provider Commands ============
 
 export async function listProviders(): Promise<Provider[]> {
@@ -129,6 +179,7 @@ export async function updateProvider(input: UpdateProviderInput): Promise<Provid
   try {
     const payload: Record<string, unknown> = { id: input.id }
     if (input.name !== undefined) payload.name = input.name
+    if (input.type !== undefined) payload.type = input.type
     if (input.baseUrl !== undefined) payload.base_url = input.baseUrl
     if (input.apiKey !== undefined) payload.api_key = input.apiKey
     if (input.authScheme !== undefined) payload.auth_scheme = input.authScheme
@@ -275,23 +326,28 @@ export async function setDefaultProfile(id: string): Promise<Profile> {
 // ============ Proxy Commands ============
 
 export async function getProxyStatus(): Promise<ProxyStatus> {
-  return invoke('get_proxy_status')
+  const result = await invoke<Record<string, unknown>>('get_proxy_status')
+  return convertProxyStatusFromBackend(result)
 }
 
 export async function startProxy(): Promise<ProxyStatus> {
-  return invoke('start_proxy')
+  const result = await invoke<Record<string, unknown>>('start_proxy')
+  return convertProxyStatusFromBackend(result)
 }
 
 export async function stopProxy(): Promise<ProxyStatus> {
-  return invoke('stop_proxy')
+  const result = await invoke<Record<string, unknown>>('stop_proxy')
+  return convertProxyStatusFromBackend(result)
 }
 
 export async function restartProxy(): Promise<ProxyStatus> {
-  return invoke('restart_proxy')
+  const result = await invoke<Record<string, unknown>>('restart_proxy')
+  return convertProxyStatusFromBackend(result)
 }
 
 export async function reloadProxyConfig(): Promise<ProxyStatus> {
-  return invoke('reload_proxy_config')
+  const result = await invoke<Record<string, unknown>>('reload_proxy_config')
+  return convertProxyStatusFromBackend(result)
 }
 
 // ============ Wrapper Commands ============
@@ -301,23 +357,45 @@ export async function detectClaudeBinary(): Promise<ClaudeBinaryDetection> {
 }
 
 export async function generateWrapper(profileId: string): Promise<GenerateWrapperResult> {
-  return invoke('generate_wrapper', { profileId })
+  const result = await invoke<Record<string, unknown>>('generate_wrapper', {
+    profileId,
+  })
+  return convertGenerateWrapperResultFromBackend(result)
 }
 
 export async function generateAllWrappers(): Promise<GenerateWrapperResult[]> {
-  return invoke('generate_all_wrappers')
+  const result = await invoke<Record<string, unknown>[]>('generate_all_wrappers')
+  return result.map(convertGenerateWrapperResultFromBackend)
 }
 
 export async function checkWrapperStatus(profileId: string): Promise<WrapperStatus> {
-  return invoke('check_wrapper_status', { profileId })
+  const result = await invoke<Record<string, unknown>>('check_wrapper_status', {
+    profileId,
+  })
+  return convertWrapperStatusFromBackend(result)
 }
 
 // ============ Settings Commands ============
 
 export async function getSettings(): Promise<AppSettings> {
-  return invoke('get_settings')
+  const result = await invoke<Record<string, unknown>>('get_settings')
+  return convertSettingsFromBackend(result)
 }
 
 export async function updateSettings(input: Partial<AppSettings>): Promise<AppSettings> {
-  return invoke('update_settings', { input })
+  const payload: Record<string, unknown> = {}
+  if (input.proxyHost !== undefined) payload.proxy_host = input.proxyHost
+  if (input.proxyPort !== undefined) payload.proxy_port = input.proxyPort
+  if (input.proxyAuthToken !== undefined) payload.proxy_auth_token = input.proxyAuthToken
+  if (input.startProxyOnLaunch !== undefined) {
+    payload.start_proxy_on_launch = input.startProxyOnLaunch
+  }
+  if (input.startAppOnLogin !== undefined) payload.start_app_on_login = input.startAppOnLogin
+  if (input.minimizeToTray !== undefined) payload.minimize_to_tray = input.minimizeToTray
+  if (input.wrapperDir !== undefined) payload.wrapper_dir = input.wrapperDir
+  if (input.claudeBinaryPath !== undefined) payload.claude_binary_path = input.claudeBinaryPath
+  if (input.theme !== undefined) payload.theme = input.theme
+
+  const result = await invoke<Record<string, unknown>>('update_settings', { input: payload })
+  return convertSettingsFromBackend(result)
 }

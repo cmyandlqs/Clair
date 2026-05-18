@@ -1,9 +1,11 @@
+use crate::db::Database;
 use crate::domain::Profile;
 use crate::services::claude_detect_service::ClaudeDetectService;
 use crate::services::SettingsService;
-use crate::db::Database;
 use serde::{Deserialize, Serialize};
 use std::fs;
+
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 pub struct WrapperService;
@@ -20,14 +22,7 @@ pub struct WrapperStatus {
 impl WrapperService {
     pub async fn generate(db: &Database, profile: &Profile) -> Result<String, String> {
         let settings = SettingsService::load_settings(db)?;
-
-        let wrapper_dir = if settings.wrapper_dir.starts_with('~') {
-            dirs::home_dir()
-                .map(|p| p.join(settings.wrapper_dir.trim_start_matches("~/")))
-                .ok_or_else(|| "Cannot determine home directory".to_string())?
-        } else {
-            std::path::PathBuf::from(&settings.wrapper_dir)
-        };
+        let wrapper_dir = resolve_wrapper_dir(&settings.wrapper_dir)?;
 
         // Ensure wrapper directory exists
         fs::create_dir_all(&wrapper_dir).map_err(|e| e.to_string())?;
@@ -42,7 +37,7 @@ impl WrapperService {
                     detection.path.unwrap_or_else(|| "claude".to_string())
                 }
                 _ => "claude".to_string(),
-            }
+            },
         };
 
         let proxy_host = &settings.proxy_host;
@@ -91,21 +86,25 @@ exec "$CLAUDE_BIN" "$@"
         Ok(wrapper_path.to_string_lossy().to_string())
     }
 
-    pub fn check_status(profile: &Profile) -> Result<WrapperStatus, String> {
-        let wrapper_dir = dirs::home_dir()
-            .map(|p| p.join(".local/bin"))
-            .unwrap_or_default();
+    pub fn check_status(db: &Database, profile: &Profile) -> Result<WrapperStatus, String> {
+        let settings = SettingsService::load_settings(db)?;
+        let wrapper_dir = resolve_wrapper_dir(&settings.wrapper_dir)?;
 
         let wrapper_path = wrapper_dir.join(&profile.command_name);
 
         let exists = wrapper_path.exists();
         let executable = if exists {
-            wrapper_path.metadata()
+            wrapper_path
+                .metadata()
                 .map(|m| {
                     #[cfg(unix)]
-                    { m.permissions().mode() & 0o111 != 0 }
+                    {
+                        m.permissions().mode() & 0o111 != 0
+                    }
                     #[cfg(not(unix))]
-                    { true }
+                    {
+                        true
+                    }
                 })
                 .unwrap_or(false)
         } else {
@@ -113,11 +112,7 @@ exec "$CLAUDE_BIN" "$@"
         };
 
         // Check if in PATH
-        let in_path = std::process::Command::new("which")
-            .arg(&profile.command_name)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
+        let in_path = check_command_in_path(&profile.command_name);
 
         Ok(WrapperStatus {
             exists,
@@ -127,4 +122,32 @@ exec "$CLAUDE_BIN" "$@"
             stale: false,
         })
     }
+}
+
+fn resolve_wrapper_dir(wrapper_dir: &str) -> Result<std::path::PathBuf, String> {
+    if wrapper_dir.starts_with('~') {
+        dirs::home_dir()
+            .map(|p| p.join(wrapper_dir.trim_start_matches("~/")))
+            .ok_or_else(|| "Cannot determine home directory".to_string())
+    } else {
+        Ok(std::path::PathBuf::from(wrapper_dir))
+    }
+}
+
+#[cfg(unix)]
+fn check_command_in_path(command_name: &str) -> bool {
+    std::process::Command::new("which")
+        .arg(command_name)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn check_command_in_path(command_name: &str) -> bool {
+    std::process::Command::new("where")
+        .arg(command_name)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }

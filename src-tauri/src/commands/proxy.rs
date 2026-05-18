@@ -1,7 +1,7 @@
 use crate::db::Database;
 use crate::domain::AppSettings;
-use crate::proxy::ProxyServer;
 use crate::proxy::server::ActiveRoute as ProxyActiveRoute;
+use crate::proxy::ProxyServer;
 use crate::services::SettingsService;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
@@ -82,14 +82,16 @@ pub async fn start_proxy(
     let server = ProxyServer::new(host.clone(), port, profiles, providers, auth_token)?;
 
     let addr = format!("{}:{}", host, port);
-    let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| e.to_string())?;
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     let server_arc = Arc::new(RwLock::new(server));
     let server_clone = server_arc.clone();
 
     tokio::spawn(async move {
-        let app = server_clone.read().await.build_router().into_make_service();
+        let app = ProxyServer::build_router(server_clone).into_make_service();
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 rx.await.ok();

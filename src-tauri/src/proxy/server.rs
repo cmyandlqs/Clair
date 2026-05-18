@@ -9,6 +9,7 @@ use axum::{
     Router,
 };
 use std::{collections::HashMap, sync::Arc};
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -29,7 +30,12 @@ impl ProxyServer {
         self.profiles = profiles;
         self.providers = providers.into_iter().map(|p| (p.id.clone(), p)).collect();
         info!(
-            profiles = self.profiles.iter().map(|p| p.route_path.as_str()).collect::<Vec<_>>().join(", "),
+            profiles = self
+                .profiles
+                .iter()
+                .map(|p| p.route_path.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
             providers = self.providers.len(),
             "Proxy config reloaded"
         );
@@ -38,7 +44,7 @@ impl ProxyServer {
 
 #[derive(Clone)]
 struct ProxyServerState {
-    server: Arc<ProxyServer>,
+    server: Arc<RwLock<ProxyServer>>,
 }
 
 impl ProxyServer {
@@ -49,9 +55,8 @@ impl ProxyServer {
         providers: Vec<Provider>,
         auth_token: String,
     ) -> Result<Self, String> {
-        let providers: HashMap<String, Provider> = providers.into_iter()
-            .map(|p| (p.id.clone(), p))
-            .collect();
+        let providers: HashMap<String, Provider> =
+            providers.into_iter().map(|p| (p.id.clone(), p)).collect();
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
@@ -69,10 +74,8 @@ impl ProxyServer {
         })
     }
 
-    pub fn build_router(&self) -> Router {
-        let state = ProxyServerState {
-            server: Arc::new(self.clone()),
-        };
+    pub fn build_router(server: Arc<RwLock<ProxyServer>>) -> Router {
+        let state = ProxyServerState { server };
 
         Router::new()
             .route("/health", get(Self::health_handler))
@@ -86,9 +89,13 @@ impl ProxyServer {
     }
 
     async fn status_handler(State(state): State<ProxyServerState>) -> String {
-        let profiles = state.server.profiles.len();
-        let providers = state.server.providers.len();
-        format!("Clair Proxy: {} profiles, {} providers", profiles, providers)
+        let server = state.server.read().await;
+        let profiles = server.profiles.len();
+        let providers = server.providers.len();
+        format!(
+            "Clair Proxy: {} profiles, {} providers",
+            profiles, providers
+        )
     }
 
     async fn proxy_handler(
@@ -98,62 +105,88 @@ impl ProxyServer {
         let method = request.method().clone();
         let path = request.uri().path().to_string();
         let path_trimmed = path.trim_start_matches('/');
+        let request_headers = request.headers();
 
         info!(path = %path, method = %method, "Incoming proxy request");
 
-        // Validate auth token
-        if let Some(auth_header) = request.headers().get("authorization") {
-            if let Ok(auth_str) = auth_header.to_str() {
-                let token = auth_str.strip_prefix("Bearer ").unwrap_or(auth_str);
-                if token != state.server.auth_token {
-                    warn!(path = %path, "Auth failed: invalid Bearer token");
-                    return json_error_response(StatusCode::UNAUTHORIZED, "unauthorized", "Invalid auth token");
-                }
-            }
-        } else if let Some(token_header) = request.headers().get("x-api-key") {
-            if let Ok(token) = token_header.to_str() {
-                if token != state.server.auth_token {
-                    warn!(path = %path, "Auth failed: invalid x-api-key");
-                    return json_error_response(StatusCode::UNAUTHORIZED, "unauthorized", "Invalid auth token");
-                }
-            }
-        }
-
-        // Parse route from path: "/minimax/v1/messages" -> route="/minimax", remaining="/v1/messages"
-        let parts: Vec<&str> = path_trimmed.splitn(2, '/').filter(|s| !s.is_empty()).collect();
+        let parts: Vec<&str> = path_trimmed
+            .splitn(2, '/')
+            .filter(|s| !s.is_empty())
+            .collect();
         if parts.is_empty() {
             warn!(path = %path, "Empty route path");
-            return json_error_response(StatusCode::NOT_FOUND, "route_not_found", "Empty route path");
+            return json_error_response(
+                StatusCode::NOT_FOUND,
+                "route_not_found",
+                "Empty route path",
+            );
         }
 
         let route = format!("/{}", parts[0]);
         let remaining_path = parts.get(1).map(|p| format!("/{}", p)).unwrap_or_default();
 
-        // Find profile by route
-        let profile = match state.server.profiles.iter().find(|p| p.route_path == route) {
-            Some(p) => p.clone(),
-            None => {
-                let available: Vec<&str> = state.server.profiles.iter().map(|p| p.route_path.as_str()).collect();
-                warn!(path = %path, route = %route, available_routes = ?available, "No profile matched route");
-                return json_error_response(
-                    StatusCode::NOT_FOUND,
-                    "profile_not_found",
-                    &format!("No profile for route: {} (available: {})", route, available.join(", ")),
-                );
-            }
-        };
+        let (client, profile, provider) = {
+            let server = state.server.read().await;
 
-        // Get provider
-        let provider = match state.server.providers.get(&profile.provider_id) {
-            Some(p) => p.clone(),
-            None => {
-                warn!(route = %route, provider_id = %profile.provider_id, "Provider not found for profile");
-                return json_error_response(StatusCode::NOT_FOUND, "provider_not_found", "Provider not found for profile");
+            match extract_auth_token(request_headers) {
+                Some(token) if token == server.auth_token => {}
+                Some(_) => {
+                    warn!(path = %path, "Auth failed: invalid auth token");
+                    return json_error_response(
+                        StatusCode::UNAUTHORIZED,
+                        "unauthorized",
+                        "Invalid auth token",
+                    );
+                }
+                None => {
+                    warn!(path = %path, "Auth failed: missing auth token");
+                    return json_error_response(
+                        StatusCode::UNAUTHORIZED,
+                        "unauthorized",
+                        "Missing auth token",
+                    );
+                }
             }
+
+            let profile = match server.profiles.iter().find(|p| p.route_path == route) {
+                Some(p) => p.clone(),
+                None => {
+                    let available: Vec<&str> = server
+                        .profiles
+                        .iter()
+                        .map(|p| p.route_path.as_str())
+                        .collect();
+                    warn!(path = %path, route = %route, available_routes = ?available, "No profile matched route");
+                    return json_error_response(
+                        StatusCode::NOT_FOUND,
+                        "profile_not_found",
+                        &format!(
+                            "No profile for route: {} (available: {})",
+                            route,
+                            available.join(", ")
+                        ),
+                    );
+                }
+            };
+
+            let provider = match server.providers.get(&profile.provider_id) {
+                Some(p) => p.clone(),
+                None => {
+                    warn!(route = %route, provider_id = %profile.provider_id, "Provider not found for profile");
+                    return json_error_response(
+                        StatusCode::NOT_FOUND,
+                        "provider_not_found",
+                        "Provider not found for profile",
+                    );
+                }
+            };
+
+            (server.client.clone(), profile, provider)
         };
 
         let request_id = Uuid::new_v4().to_string();
         let start = std::time::Instant::now();
+        let upstream_url = build_upstream_url(&provider.base_url, &remaining_path);
 
         info!(
             request_id = %request_id,
@@ -161,15 +194,11 @@ impl ProxyServer {
             remaining = %remaining_path,
             provider = %provider.name,
             api_key = %mask_api_key(&provider.api_key),
+            upstream_url = %upstream_url,
             "Proxying request"
         );
 
-        // Build upstream URL, avoiding /v1 duplication
-        let upstream_url = build_upstream_url(&provider.base_url, &remaining_path);
-        info!(request_id = %request_id, upstream_url = %upstream_url, "Upstream URL built");
-
-        // Forward request
-        let result = state.server.forward_request(&upstream_url, &provider, &profile, request).await;
+        let result = forward_request(client, &upstream_url, &provider, &profile, request).await;
 
         let latency_ms = start.elapsed().as_millis() as u64;
         match &result {
@@ -196,7 +225,8 @@ impl ProxyServer {
                         "type": "provider_connection_error",
                         "message": e.to_string()
                     }
-                }).to_string();
+                })
+                .to_string();
 
                 Response::builder()
                     .status(StatusCode::BAD_GATEWAY)
@@ -205,103 +235,6 @@ impl ProxyServer {
                     .unwrap()
             }
         }
-    }
-
-    async fn forward_request(
-        &self,
-        upstream_url: &str,
-        provider: &Provider,
-        profile: &Profile,
-        request: Request<Body>,
-    ) -> Result<Response, String> {
-        let method = request.method().clone();
-        let mut req_builder = self.client.request(method.clone(), upstream_url);
-
-        // Set auth header based on provider auth scheme
-        match provider.auth_scheme {
-            crate::domain::AuthScheme::XApiKey => {
-                req_builder = req_builder.header("x-api-key", &provider.api_key);
-            }
-            crate::domain::AuthScheme::Bearer => {
-                req_builder = req_builder.header("Authorization", format!("Bearer {}", provider.api_key));
-            }
-        }
-
-        // Copy headers (filtered)
-        let hop_by_hop = [
-            "authorization",
-            "x-api-key",
-            "host",
-            "content-length",
-            "transfer-encoding",
-            "connection",
-            "keep-alive",
-            "upgrade",
-        ];
-        for (key, value) in request.headers() {
-            let key_str = key.as_str();
-            if hop_by_hop.iter().any(|h| h.eq_ignore_ascii_case(key_str)) {
-                continue;
-            }
-            req_builder = req_builder.header(key_str, value);
-        }
-
-        // Collect body
-        let body = axum::body::to_bytes(request.into_body(), MAX_REQUEST_BODY)
-            .await
-            .map_err(|e| format!("Failed to read request body: {}", e))?
-            .to_vec();
-
-        // Override model in body if present
-        let body = if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&body) {
-            if json.get("model").is_some() {
-                json["model"] = serde_json::Value::String(profile.model.clone());
-                serde_json::to_vec(&json).map_err(|e| e.to_string())?
-            } else {
-                body
-            }
-        } else {
-            body
-        };
-
-        req_builder = req_builder.body(body);
-
-        // Send request
-        let response = req_builder.send().await.map_err(|e| e.to_string())?;
-
-        let status = response.status();
-        let headers = response.headers().clone();
-
-        let stream = response.bytes_stream();
-
-        // Build response with forwarded headers
-        let mut builder = Response::builder().status(status);
-
-        // Forward relevant response headers
-        let forward_headers = [
-            "content-type",
-            "cache-control",
-            "x-request-id",
-            "x-ratelimit-remaining",
-            "x-ratelimit-limit",
-            "x-ratelimit-reset",
-            "retry-after",
-        ];
-        for header_name in &forward_headers {
-            if let Some(value) = headers.get(*header_name) {
-                let name = HeaderName::from_bytes(header_name.as_bytes()).unwrap();
-                builder = builder.header(name, value);
-            }
-        }
-
-        // Ensure content-type is set
-        if !builder.headers_ref().map_or(false, |h| h.contains_key("content-type")) {
-            builder = builder.header("content-type", "application/json");
-        }
-
-        builder
-            .body(Body::from_stream(stream))
-            .map_err(|e| e.to_string())
     }
 
     pub async fn get_active_routes(&self) -> Vec<ActiveRoute> {
@@ -323,6 +256,118 @@ impl ProxyServer {
     }
 }
 
+fn extract_auth_token(headers: &axum::http::HeaderMap) -> Option<String> {
+    if let Some(auth_header) = headers.get("authorization") {
+        if let Ok(auth_str) = auth_header.to_str() {
+            return Some(
+                auth_str
+                    .strip_prefix("Bearer ")
+                    .unwrap_or(auth_str)
+                    .to_string(),
+            );
+        }
+    }
+
+    if let Some(token_header) = headers.get("x-api-key") {
+        if let Ok(token) = token_header.to_str() {
+            return Some(token.to_string());
+        }
+    }
+
+    None
+}
+
+async fn forward_request(
+    client: reqwest::Client,
+    upstream_url: &str,
+    provider: &Provider,
+    profile: &Profile,
+    request: Request<Body>,
+) -> Result<Response, String> {
+    let method = request.method().clone();
+    let mut req_builder = client.request(method.clone(), upstream_url);
+
+    match provider.auth_scheme {
+        crate::domain::AuthScheme::XApiKey => {
+            req_builder = req_builder.header("x-api-key", &provider.api_key);
+        }
+        crate::domain::AuthScheme::Bearer => {
+            req_builder =
+                req_builder.header("Authorization", format!("Bearer {}", provider.api_key));
+        }
+    }
+
+    let hop_by_hop = [
+        "authorization",
+        "x-api-key",
+        "host",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "keep-alive",
+        "upgrade",
+    ];
+    for (key, value) in request.headers() {
+        let key_str = key.as_str();
+        if hop_by_hop.iter().any(|h| h.eq_ignore_ascii_case(key_str)) {
+            continue;
+        }
+        req_builder = req_builder.header(key_str, value);
+    }
+
+    let body = axum::body::to_bytes(request.into_body(), MAX_REQUEST_BODY)
+        .await
+        .map_err(|e| format!("Failed to read request body: {}", e))?
+        .to_vec();
+
+    let body = if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&body) {
+        if json.get("model").is_some() {
+            json["model"] = serde_json::Value::String(profile.model.clone());
+            serde_json::to_vec(&json).map_err(|e| e.to_string())?
+        } else {
+            body
+        }
+    } else {
+        body
+    };
+
+    req_builder = req_builder.body(body);
+
+    let response = req_builder.send().await.map_err(|e| e.to_string())?;
+    let status = response.status();
+    let headers = response.headers().clone();
+    let stream = response.bytes_stream();
+
+    let mut builder = Response::builder().status(status);
+
+    let forward_headers = [
+        "content-type",
+        "cache-control",
+        "x-request-id",
+        "x-ratelimit-remaining",
+        "x-ratelimit-limit",
+        "x-ratelimit-reset",
+        "retry-after",
+    ];
+    for header_name in &forward_headers {
+        if let Some(value) = headers.get(*header_name) {
+            let name = HeaderName::from_bytes(header_name.as_bytes()).unwrap();
+            builder = builder.header(name, value);
+        }
+    }
+
+    if !builder
+        .headers_ref()
+        .map_or(false, |h| h.contains_key("content-type"))
+    {
+        builder = builder.header("content-type", "application/json");
+    }
+
+    builder
+        .body(Body::from_stream(stream))
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActiveRoute {
     pub route_path: String,
@@ -337,7 +382,8 @@ fn json_error_response(status: StatusCode, error_type: &str, message: &str) -> R
             "type": error_type,
             "message": message
         }
-    }).to_string();
+    })
+    .to_string();
     Response::builder()
         .status(status)
         .header("Content-Type", "application/json")
@@ -417,7 +463,10 @@ mod tests {
         // Simulates the parsing logic in proxy_handler
         let path = "/minimax/v1/messages";
         let path_trimmed = path.trim_start_matches('/');
-        let parts: Vec<&str> = path_trimmed.splitn(2, '/').filter(|s| !s.is_empty()).collect();
+        let parts: Vec<&str> = path_trimmed
+            .splitn(2, '/')
+            .filter(|s| !s.is_empty())
+            .collect();
         assert_eq!(parts, vec!["minimax", "v1/messages"]);
 
         let route = format!("/{}", parts[0]);
@@ -430,7 +479,10 @@ mod tests {
     fn test_route_path_parsing_no_subpath() {
         let path = "/minimax";
         let path_trimmed = path.trim_start_matches('/');
-        let parts: Vec<&str> = path_trimmed.splitn(2, '/').filter(|s| !s.is_empty()).collect();
+        let parts: Vec<&str> = path_trimmed
+            .splitn(2, '/')
+            .filter(|s| !s.is_empty())
+            .collect();
         assert_eq!(parts, vec!["minimax"]);
 
         let route = format!("/{}", parts[0]);
@@ -443,7 +495,10 @@ mod tests {
     fn test_route_path_parsing_trailing_slash() {
         let path = "/minimax/";
         let path_trimmed = path.trim_start_matches('/');
-        let parts: Vec<&str> = path_trimmed.splitn(2, '/').filter(|s| !s.is_empty()).collect();
+        let parts: Vec<&str> = path_trimmed
+            .splitn(2, '/')
+            .filter(|s| !s.is_empty())
+            .collect();
         assert_eq!(parts, vec!["minimax"]);
 
         let route = format!("/{}", parts[0]);
@@ -456,7 +511,10 @@ mod tests {
     fn test_route_path_parsing_deep_path() {
         let path = "/glm/v1/messages/completions";
         let path_trimmed = path.trim_start_matches('/');
-        let parts: Vec<&str> = path_trimmed.splitn(2, '/').filter(|s| !s.is_empty()).collect();
+        let parts: Vec<&str> = path_trimmed
+            .splitn(2, '/')
+            .filter(|s| !s.is_empty())
+            .collect();
         assert_eq!(parts, vec!["glm", "v1/messages/completions"]);
 
         let route = format!("/{}", parts[0]);
@@ -494,39 +552,82 @@ mod integration_tests {
             vec![profile],
             vec![],
             "test-token".into(),
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     #[tokio::test]
     async fn test_fallback_catches_minimax_route() {
         let server = create_test_server();
-        let app = server.build_router();
+        let app = ProxyServer::build_router(Arc::new(RwLock::new(server)));
 
         let response = app
-            .oneshot(Request::builder().uri("/minimax/v1/messages").body(Body::from("")).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/minimax/v1/messages")
+                    .header("authorization", "Bearer test-token")
+                    .body(Body::from(""))
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
         // Should NOT be 404 page not found - fallback should catch it
         // Since provider doesn't exist, it should return provider_not_found (still 404 but with JSON body)
-        let ct = response.headers().get("content-type").unwrap().to_str().unwrap();
-        assert_ne!(ct, "text/plain", "Should return JSON, not Axum default text/plain");
+        let ct = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_ne!(
+            ct, "text/plain",
+            "Should return JSON, not Axum default text/plain"
+        );
 
-        let body = axum::body::to_bytes(response.into_body(), 10000).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 10000)
+            .await
+            .unwrap();
         let body_str = String::from_utf8(body.to_vec()).unwrap();
-        assert!(!body_str.contains("404 page not found"), "Should not return default Axum 404");
+        assert!(
+            !body_str.contains("404 page not found"),
+            "Should not return default Axum 404"
+        );
     }
 
     #[tokio::test]
     async fn test_health_works() {
         let server = create_test_server();
-        let app = server.build_router();
+        let app = ProxyServer::build_router(Arc::new(RwLock::new(server)));
 
         let response = app
-            .oneshot(Request::builder().uri("/health").body(Body::from("")).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::from(""))
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_missing_auth_is_rejected() {
+        let server = create_test_server();
+        let app = ProxyServer::build_router(Arc::new(RwLock::new(server)));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/minimax/v1/messages")
+                    .body(Body::from(""))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

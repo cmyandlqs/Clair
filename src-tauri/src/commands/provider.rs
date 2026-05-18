@@ -1,8 +1,9 @@
+use crate::commands::proxy::ProxyState;
 use crate::db::Database;
-use crate::domain::{Provider, ProviderType, AuthScheme, ProviderStatus};
+use crate::domain::{AuthScheme, Provider, ProviderStatus, ProviderType};
+use crate::security::validation::is_valid_http_url;
 use crate::services::provider_service::ProviderService;
 use crate::services::provider_service::TestProviderResult;
-use crate::commands::proxy::ProxyState;
 use serde::Deserialize;
 use tauri::State;
 
@@ -23,6 +24,8 @@ pub struct CreateProviderInput {
 pub struct UpdateProviderInput {
     pub id: String,
     pub name: Option<String>,
+    #[serde(rename = "type")]
+    pub provider_type: Option<ProviderType>,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub auth_scheme: Option<AuthScheme>,
@@ -44,6 +47,7 @@ pub async fn create_provider(
     input: CreateProviderInput,
 ) -> Result<Provider, String> {
     tracing::info!(name = %input.name, "Creating provider");
+    validate_base_url(&input.base_url)?;
 
     let provider = Provider::new(
         input.name,
@@ -72,18 +76,40 @@ pub async fn update_provider(
 ) -> Result<Provider, String> {
     tracing::info!(id = %input.id, "Updating provider");
 
-    let mut provider = db.get_provider(&input.id)
+    let mut provider = db
+        .get_provider(&input.id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Provider not found".to_string())?;
 
-    if let Some(v) = input.name { provider.name = v; }
-    if let Some(v) = input.base_url { provider.base_url = v; }
-    if let Some(v) = input.api_key { provider.api_key = v; }
-    if let Some(v) = input.auth_scheme { provider.auth_scheme = v; }
-    if let Some(v) = input.default_model { provider.default_model = v; }
-    if let Some(v) = input.enable_streaming { provider.enable_streaming = v; }
-    if let Some(v) = input.notes { provider.notes = Some(v); }
-    if let Some(v) = input.status { provider.status = v; }
+    if let Some(v) = input.name {
+        provider.name = v;
+    }
+    if let Some(v) = input.provider_type {
+        provider.provider_type = v;
+    }
+    if let Some(v) = input.base_url {
+        provider.base_url = v;
+    }
+    if let Some(v) = input.api_key {
+        provider.api_key = v;
+    }
+    if let Some(v) = input.auth_scheme {
+        provider.auth_scheme = v;
+    }
+    if let Some(v) = input.default_model {
+        provider.default_model = v;
+    }
+    if let Some(v) = input.enable_streaming {
+        provider.enable_streaming = v;
+    }
+    if let Some(v) = input.notes {
+        provider.notes = Some(v);
+    }
+    if let Some(v) = input.status {
+        provider.status = v;
+    }
+
+    validate_base_url(&provider.base_url)?;
 
     db.update_provider(&provider).map_err(|e| e.to_string())?;
 
@@ -100,7 +126,10 @@ pub async fn delete_provider(
     id: String,
 ) -> Result<bool, String> {
     if db.provider_has_profiles(&id).map_err(|e| e.to_string())? {
-        return Err("Provider is used by existing profiles. Please delete or reassign them first.".to_string());
+        return Err(
+            "Provider is used by existing profiles. Please delete or reassign them first."
+                .to_string(),
+        );
     }
 
     db.delete_provider(&id).map_err(|e| e.to_string())?;
@@ -113,14 +142,19 @@ pub async fn test_provider(
     db: State<'_, Database>,
     id: String,
 ) -> Result<TestProviderResult, String> {
-    let provider = db.get_provider(&id)
+    let provider = db
+        .get_provider(&id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Provider not found".to_string())?;
 
     let result = ProviderService::test_provider(&provider).await;
 
     if let Ok(ref r) = result {
-        let status = if r.ok { ProviderStatus::Ready } else { ProviderStatus::Error };
+        let status = if r.ok {
+            ProviderStatus::Ready
+        } else {
+            ProviderStatus::Error
+        };
         let _ = db.update_provider(&Provider {
             status,
             last_tested_at: Some(chrono::Utc::now().to_rfc3339()),
@@ -145,11 +179,21 @@ pub async fn test_provider_config(
     input: TestProviderConfigInput,
 ) -> Result<TestProviderResult, String> {
     tracing::info!(provider_type = %input.provider_type, base_url = %input.base_url, "Testing provider config");
+    validate_base_url(&input.base_url)?;
     ProviderService::test_config(
         &input.provider_type,
         &input.base_url,
         &input.api_key,
         &input.auth_scheme,
         &input.default_model,
-    ).await
+    )
+    .await
+}
+
+fn validate_base_url(url: &str) -> Result<(), String> {
+    if is_valid_http_url(url) {
+        Ok(())
+    } else {
+        Err("Base URL must be a valid http:// or https:// URL".to_string())
+    }
 }

@@ -1,7 +1,9 @@
+use crate::commands::proxy::ProxyState;
 use crate::db::Database;
 use crate::domain::Profile;
-use crate::security::validation::{is_reserved_route, is_dangerous_command};
-use crate::commands::proxy::ProxyState;
+use crate::security::validation::{
+    is_dangerous_command, is_reserved_route, is_valid_command_name, is_valid_route_path,
+};
 use chrono::Utc;
 use serde::Deserialize;
 use tauri::State;
@@ -50,7 +52,11 @@ pub async fn create_profile(
         .ok_or_else(|| "Provider not found".to_string())?;
 
     // Check for duplicate routes
-    if db.get_profile_by_route(&input.route_path).map_err(|e| e.to_string())?.is_some() {
+    if db
+        .get_profile_by_route(&input.route_path)
+        .map_err(|e| e.to_string())?
+        .is_some()
+    {
         return Err("Route path already exists".to_string());
     }
 
@@ -92,9 +98,9 @@ pub async fn update_profile(
     proxy_state: State<'_, ProxyState>,
     input: UpdateProfileInput,
 ) -> Result<Profile, String> {
-    let profiles = db.list_profiles().map_err(|e| e.to_string())?;
-    let mut profile = profiles.into_iter()
-        .find(|p| p.id == input.id)
+    let mut profile = db
+        .get_profile(&input.id)
+        .map_err(|e| e.to_string())?
         .ok_or_else(|| "Profile not found".to_string())?;
 
     if let Some(name) = input.name {
@@ -158,19 +164,23 @@ pub async fn set_default_profile(
     proxy_state: State<'_, ProxyState>,
     id: String,
 ) -> Result<Profile, String> {
-    db.set_default_profile(&id).map_err(|e| e.to_string())?;
+    if !db.set_default_profile(&id).map_err(|e| e.to_string())? {
+        return Err("Profile not found".to_string());
+    }
 
     let _ = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await;
 
-    let profiles = db.list_profiles().map_err(|e| e.to_string())?;
-    profiles.into_iter()
-        .find(|p| p.id == id)
+    db.get_profile(&id)
+        .map_err(|e| e.to_string())?
         .ok_or_else(|| "Profile not found".to_string())
 }
 
 fn validate_route_path(route: &str) -> Result<(), String> {
-    if !route.starts_with('/') {
-        return Err("Route path must start with /".to_string());
+    if !is_valid_route_path(route) {
+        return Err(
+            "Route path must start with / and contain only lowercase letters, numbers, - and _"
+                .to_string(),
+        );
     }
     if is_reserved_route(route) {
         return Err("This route path is reserved".to_string());
@@ -179,6 +189,9 @@ fn validate_route_path(route: &str) -> Result<(), String> {
 }
 
 fn validate_command_name(cmd: &str) -> Result<(), String> {
+    if !is_valid_command_name(cmd) {
+        return Err("Command name can only contain letters, numbers, - and _".to_string());
+    }
     if is_dangerous_command(cmd) {
         return Err("This command name is not allowed".to_string());
     }

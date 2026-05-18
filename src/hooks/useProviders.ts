@@ -54,7 +54,12 @@ export function useDeleteProvider() {
 }
 
 export function useTestProvider() {
+  const queryClient = useQueryClient()
+
   return useMutation({
     mutationFn: (id: string) => testProvider(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['providers'] })
+    },
   })
 }

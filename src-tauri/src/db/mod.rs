@@ -3,10 +3,10 @@ pub mod migrations;
 
 pub use connection::Database;
 
-use std::collections::HashMap;
-use crate::domain::{Provider, Profile, ProviderType, AuthScheme, ProviderStatus};
+use crate::domain::{AuthScheme, Profile, Provider, ProviderStatus, ProviderType};
 use chrono::Utc;
 use rusqlite::params;
+use std::collections::HashMap;
 
 impl Database {
     // ============ Provider Repository ============
@@ -19,23 +19,25 @@ impl Database {
                     created_at, updated_at FROM providers ORDER BY name",
         )?;
 
-        let providers = stmt.query_map([], |row| {
-            Ok(Provider {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                provider_type: parse_provider_type(&row.get::<_, String>(2)?),
-                base_url: row.get(3)?,
-                api_key: row.get(4)?,
-                auth_scheme: parse_auth_scheme(&row.get::<_, String>(5)?),
-                default_model: row.get(6)?,
-                enable_streaming: row.get::<_, i32>(7)? == 1,
-                notes: row.get(8)?,
-                status: parse_provider_status(&row.get::<_, String>(9)?),
-                last_tested_at: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let providers = stmt
+            .query_map([], |row| {
+                Ok(Provider {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    provider_type: parse_provider_type(&row.get::<_, String>(2)?),
+                    base_url: row.get(3)?,
+                    api_key: row.get(4)?,
+                    auth_scheme: parse_auth_scheme(&row.get::<_, String>(5)?),
+                    default_model: row.get(6)?,
+                    enable_streaming: row.get::<_, i32>(7)? == 1,
+                    notes: row.get(8)?,
+                    status: parse_provider_status(&row.get::<_, String>(9)?),
+                    last_tested_at: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(providers)
     }
@@ -147,21 +149,23 @@ impl Database {
              FROM profiles ORDER BY is_default DESC, name",
         )?;
 
-        let profiles = stmt.query_map([], |row| {
-            Ok(Profile {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                route_path: row.get(2)?,
-                provider_id: row.get(3)?,
-                model: row.get(4)?,
-                command_name: row.get(5)?,
-                is_default: row.get::<_, i32>(6)? == 1,
-                wrapper_enabled: row.get::<_, i32>(7)? == 1,
-                wrapper_path: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
-            })
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let profiles = stmt
+            .query_map([], |row| {
+                Ok(Profile {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    route_path: row.get(2)?,
+                    provider_id: row.get(3)?,
+                    model: row.get(4)?,
+                    command_name: row.get(5)?,
+                    is_default: row.get::<_, i32>(6)? == 1,
+                    wrapper_enabled: row.get::<_, i32>(7)? == 1,
+                    wrapper_path: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(profiles)
     }
@@ -217,6 +221,34 @@ impl Database {
         }
     }
 
+    pub fn get_profile(&self, id: &str) -> rusqlite::Result<Option<Profile>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, route_path, provider_id, model, command_name,
+                    is_default, wrapper_enabled, wrapper_path, created_at, updated_at
+             FROM profiles WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Profile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                route_path: row.get(2)?,
+                provider_id: row.get(3)?,
+                model: row.get(4)?,
+                command_name: row.get(5)?,
+                is_default: row.get::<_, i32>(6)? == 1,
+                wrapper_enabled: row.get::<_, i32>(7)? == 1,
+                wrapper_path: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn update_profile(&self, profile: &Profile) -> rusqlite::Result<()> {
         let conn = self.connection();
         let now = Utc::now().to_rfc3339();
@@ -248,15 +280,35 @@ impl Database {
 
     pub fn clear_default_profile(&self) -> rusqlite::Result<()> {
         let conn = self.connection();
-        conn.execute("UPDATE profiles SET is_default = 0 WHERE is_default = 1", [])?;
+        conn.execute(
+            "UPDATE profiles SET is_default = 0 WHERE is_default = 1",
+            [],
+        )?;
         Ok(())
     }
 
-    pub fn set_default_profile(&self, id: &str) -> rusqlite::Result<()> {
-        let conn = self.connection();
-        conn.execute("UPDATE profiles SET is_default = 0", [])?;
-        conn.execute("UPDATE profiles SET is_default = 1 WHERE id = ?1", params![id])?;
-        Ok(())
+    pub fn set_default_profile(&self, id: &str) -> rusqlite::Result<bool> {
+        let mut conn = self.connection();
+        let tx = conn.transaction()?;
+
+        let exists: i32 = tx.query_row(
+            "SELECT COUNT(*) FROM profiles WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+
+        if exists == 0 {
+            tx.rollback()?;
+            return Ok(false);
+        }
+
+        tx.execute("UPDATE profiles SET is_default = 0", [])?;
+        tx.execute(
+            "UPDATE profiles SET is_default = 1 WHERE id = ?1",
+            params![id],
+        )?;
+        tx.commit()?;
+        Ok(true)
     }
 
     // ============ Settings Repository ============

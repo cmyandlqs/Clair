@@ -14,6 +14,12 @@ pub struct TestProviderResult {
 
 pub struct ProviderService;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TestProtocol {
+    Anthropic,
+    OpenAi,
+}
+
 impl ProviderService {
     pub async fn test_config(
         provider_type: &ProviderType,
@@ -47,37 +53,12 @@ impl ProviderService {
             .build()
             .map_err(|e| e.to_string())?;
 
-        // Determine endpoint based on provider type
-        // Anthropic uses /v1/messages, OpenAI/GLM use /v1/chat/completions
-        let url = match provider.provider_type {
-            ProviderType::AnthropicCompatible => {
-                format!("{}/v1/messages", provider.base_url.trim_end_matches('/'))
-            }
-            ProviderType::OpenaiCompatible | ProviderType::Custom => {
-                // GLM and OpenAI compatible APIs use chat completions
-                format!("{}/v4/chat/completions", provider.base_url.trim_end_matches('/'))
-            }
-        };
+        let protocol = detect_test_protocol(provider);
+        let url = build_test_endpoint(provider, protocol);
 
         tracing::info!("[test_provider] testing URL: {}", url);
 
-        // Build request body based on provider type
-        let request_body = match provider.provider_type {
-            ProviderType::AnthropicCompatible => {
-                serde_json::json!({
-                    "model": provider.default_model,
-                    "messages": [{"role": "user", "content": "Say ok."}],
-                    "max_tokens": 8
-                })
-            }
-            ProviderType::OpenaiCompatible | ProviderType::Custom => {
-                serde_json::json!({
-                    "model": provider.default_model,
-                    "messages": [{"role": "user", "content": "Say ok."}],
-                    "max_tokens": 8
-                })
-            }
-        };
+        let request_body = build_test_request_body(provider, protocol);
 
         let start = Instant::now();
 
@@ -88,7 +69,8 @@ impl ProviderService {
                 req_builder = req_builder.header("x-api-key", &provider.api_key);
             }
             crate::domain::AuthScheme::Bearer => {
-                req_builder = req_builder.header("Authorization", format!("Bearer {}", provider.api_key));
+                req_builder =
+                    req_builder.header("Authorization", format!("Bearer {}", provider.api_key));
             }
         }
 
@@ -142,5 +124,107 @@ impl ProviderService {
                 })
             }
         }
+    }
+}
+
+fn detect_test_protocol(provider: &Provider) -> TestProtocol {
+    let trimmed = provider.base_url.trim_end_matches('/');
+
+    match provider.provider_type {
+        ProviderType::AnthropicCompatible => TestProtocol::Anthropic,
+        ProviderType::OpenaiCompatible => TestProtocol::OpenAi,
+        ProviderType::Custom => {
+            if trimmed.ends_with("/messages") || trimmed.ends_with("/v1/messages") {
+                TestProtocol::Anthropic
+            } else if trimmed.ends_with("/chat/completions")
+                || trimmed.ends_with("/v1/chat/completions")
+            {
+                TestProtocol::OpenAi
+            } else {
+                TestProtocol::Anthropic
+            }
+        }
+    }
+}
+
+fn build_test_endpoint(provider: &Provider, protocol: TestProtocol) -> String {
+    let base = provider.base_url.trim_end_matches('/');
+
+    match protocol {
+        TestProtocol::Anthropic => {
+            if base.ends_with("/messages") || base.ends_with("/v1/messages") {
+                base.to_string()
+            } else {
+                format!("{base}/v1/messages")
+            }
+        }
+        TestProtocol::OpenAi => {
+            if base.ends_with("/chat/completions") || base.ends_with("/v1/chat/completions") {
+                base.to_string()
+            } else {
+                format!("{base}/v1/chat/completions")
+            }
+        }
+    }
+}
+
+fn build_test_request_body(provider: &Provider, protocol: TestProtocol) -> serde_json::Value {
+    match protocol {
+        TestProtocol::Anthropic => serde_json::json!({
+            "model": provider.default_model,
+            "messages": [{"role": "user", "content": "Say ok."}],
+            "max_tokens": 8
+        }),
+        TestProtocol::OpenAi => serde_json::json!({
+            "model": provider.default_model,
+            "messages": [{"role": "user", "content": "Say ok."}],
+            "max_tokens": 8
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{AuthScheme, Provider};
+
+    fn build_provider(provider_type: ProviderType, base_url: &str) -> Provider {
+        Provider {
+            id: "provider-1".to_string(),
+            name: "Provider".to_string(),
+            provider_type,
+            base_url: base_url.to_string(),
+            api_key: "secret".to_string(),
+            auth_scheme: AuthScheme::Bearer,
+            default_model: "test-model".to_string(),
+            enable_streaming: true,
+            notes: None,
+            status: ProviderStatus::Untested,
+            last_tested_at: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn openai_provider_uses_v1_chat_completions() {
+        let provider = build_provider(ProviderType::OpenaiCompatible, "https://api.example.com");
+        assert_eq!(
+            build_test_endpoint(&provider, detect_test_protocol(&provider)),
+            "https://api.example.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn custom_provider_preserves_messages_endpoint() {
+        let provider = build_provider(
+            ProviderType::Custom,
+            "https://api.example.com/custom/messages",
+        );
+        assert_eq!(detect_test_protocol(&provider), TestProtocol::Anthropic);
+        assert_eq!(
+            build_test_endpoint(&provider, detect_test_protocol(&provider)),
+            "https://api.example.com/custom/messages"
+        );
     }
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { X, FolderOpen, Download, Upload, RotateCcw } from 'lucide-react'
 import { useSettings, useUpdateSettings } from '@/hooks/useSettings'
@@ -19,6 +19,14 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [theme, setTheme] = useState(settings?.theme ?? 'system')
   const [startProxyOnLaunch, setStartProxyOnLaunch] = useState(settings?.startProxyOnLaunch ?? true)
   const [startAppOnLogin, setStartAppOnLogin] = useState(settings?.startAppOnLogin ?? false)
+
+  useEffect(() => {
+    if (settings) {
+      setTheme(settings.theme)
+      setStartProxyOnLaunch(settings.startProxyOnLaunch)
+      setStartAppOnLogin(settings.startAppOnLogin)
+    }
+  }, [settings])
 
   const handleSave = async () => {
     try {
