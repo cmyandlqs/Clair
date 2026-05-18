@@ -8,6 +8,8 @@ import type {
   AppSettings,
   ProxyStatus,
   TestProviderResult,
+  TestProfileResult,
+  ProxyEvidenceEntry,
   WrapperStatus,
   ClaudeBinaryDetection,
   GenerateWrapperResult,
@@ -139,6 +141,47 @@ function convertGenerateWrapperResultFromBackend(
     success: result.success as boolean,
     path: result.path as string,
     commandName: result.command_name as string,
+  }
+}
+
+function convertProxyEvidenceEntryFromBackend(
+  entry: Record<string, unknown>
+): ProxyEvidenceEntry {
+  return {
+    id: entry.id as string,
+    timestamp: entry.timestamp as string,
+    requestPath: entry.request_path as string,
+    routePath: entry.route_path as string | undefined,
+    profileName: entry.profile_name as string | undefined,
+    providerName: entry.provider_name as string | undefined,
+    providerType: entry.provider_type as string | undefined,
+    requestSource: entry.request_source as string | undefined,
+    upstreamUrl: entry.upstream_url as string | undefined,
+    originalModel: entry.original_model as string | undefined,
+    rewrittenModel: entry.rewritten_model as string | undefined,
+    authResult: entry.auth_result as string,
+    outcome: entry.outcome as string,
+    statusCode: entry.status_code as number | undefined,
+    latencyMs: entry.latency_ms as number | undefined,
+    error: entry.error as string | undefined,
+  }
+}
+
+function convertTestProfileResultFromBackend(
+  result: Record<string, unknown>
+): TestProfileResult {
+  const evidence = result.evidence as Record<string, unknown> | undefined
+
+  return {
+    ok: result.ok as boolean,
+    latencyMs: result.latency_ms as number | undefined,
+    message: result.message as string,
+    routePath: result.route_path as string,
+    providerName: result.provider_name as string,
+    expectedModel: result.expected_model as string,
+    localUrl: result.local_url as string,
+    statusCode: result.status_code as number | undefined,
+    evidence: evidence ? convertProxyEvidenceEntryFromBackend(evidence) : undefined,
   }
 }
 
@@ -323,6 +366,16 @@ export async function setDefaultProfile(id: string): Promise<Profile> {
   }
 }
 
+export async function testProfile(profileId: string): Promise<TestProfileResult> {
+  try {
+    const result = await invoke<Record<string, unknown>>('test_profile', { profileId })
+    return convertTestProfileResultFromBackend(result)
+  } catch (error) {
+    console.error('[testProfile] error:', error)
+    throw error
+  }
+}
+
 // ============ Proxy Commands ============
 
 export async function getProxyStatus(): Promise<ProxyStatus> {
@@ -348,6 +401,11 @@ export async function restartProxy(): Promise<ProxyStatus> {
 export async function reloadProxyConfig(): Promise<ProxyStatus> {
   const result = await invoke<Record<string, unknown>>('reload_proxy_config')
   return convertProxyStatusFromBackend(result)
+}
+
+export async function getProxyEvidence(limit = 20): Promise<ProxyEvidenceEntry[]> {
+  const result = await invoke<Record<string, unknown>[]>('get_proxy_evidence', { limit })
+  return result.map(convertProxyEvidenceEntryFromBackend)
 }
 
 // ============ Wrapper Commands ============

@@ -45,30 +45,13 @@ impl WrapperService {
         let auth_token = &settings.proxy_auth_token;
 
         // Generate wrapper script
-        let wrapper_content = format!(
-            r#"#!/usr/bin/env bash
-set -e
-
-CLAIR_BASE_URL="http://{proxy_host}:{proxy_port}{route_path}"
-CLAIR_TOKEN="{auth_token}"
-CLAUDE_BIN="{claude_path}"
-
-export ANTHROPIC_BASE_URL="$CLAIR_BASE_URL"
-export ANTHROPIC_AUTH_TOKEN="$CLAIR_TOKEN"
-
-if ! command -v "$CLAUDE_BIN" &> /dev/null; then
-    echo "Error: Claude binary not found: $CLAUDE_BIN" >&2
-    echo "Please install Claude Code or update the wrapper script." >&2
-    exit 1
-fi
-
-exec "$CLAUDE_BIN" "$@"
-"#,
-            proxy_host = proxy_host,
-            proxy_port = proxy_port,
-            route_path = profile.route_path,
-            auth_token = auth_token,
-            claude_path = claude_path
+        let wrapper_content = build_wrapper_content(
+            proxy_host,
+            proxy_port,
+            &profile.route_path,
+            auth_token,
+            &claude_path,
+            &profile.model,
         );
 
         fs::write(&wrapper_path, &wrapper_content).map_err(|e| e.to_string())?;
@@ -96,10 +79,10 @@ exec "$CLAUDE_BIN" "$@"
         let executable = if exists {
             wrapper_path
                 .metadata()
-                .map(|m| {
+                .map(|_metadata| {
                     #[cfg(unix)]
                     {
-                        m.permissions().mode() & 0o111 != 0
+                        _metadata.permissions().mode() & 0o111 != 0
                     }
                     #[cfg(not(unix))]
                     {
@@ -124,6 +107,47 @@ exec "$CLAUDE_BIN" "$@"
     }
 }
 
+fn build_wrapper_content(
+    proxy_host: &str,
+    proxy_port: u16,
+    route_path: &str,
+    auth_token: &str,
+    claude_path: &str,
+    model: &str,
+) -> String {
+    format!(
+        r#"#!/usr/bin/env bash
+set -e
+
+CLAIR_BASE_URL="http://{proxy_host}:{proxy_port}{route_path}"
+CLAIR_TOKEN="{auth_token}"
+CLAUDE_BIN="{claude_path}"
+CLAIR_MODEL="{model}"
+
+export ANTHROPIC_BASE_URL="$CLAIR_BASE_URL"
+export ANTHROPIC_AUTH_TOKEN="$CLAIR_TOKEN"
+export ANTHROPIC_MODEL="$CLAIR_MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$CLAIR_MODEL"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$CLAIR_MODEL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$CLAIR_MODEL"
+
+if ! command -v "$CLAUDE_BIN" &> /dev/null; then
+    echo "Error: Claude binary not found: $CLAUDE_BIN" >&2
+    echo "Please install Claude Code or update the wrapper script." >&2
+    exit 1
+fi
+
+exec "$CLAUDE_BIN" "$@"
+"#,
+        proxy_host = proxy_host,
+        proxy_port = proxy_port,
+        route_path = route_path,
+        auth_token = auth_token,
+        claude_path = claude_path,
+        model = model
+    )
+}
+
 fn resolve_wrapper_dir(wrapper_dir: &str) -> Result<std::path::PathBuf, String> {
     if wrapper_dir.starts_with('~') {
         dirs::home_dir()
@@ -141,6 +165,29 @@ fn check_command_in_path(command_name: &str) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_wrapper_content;
+
+    #[test]
+    fn wrapper_exports_profile_model_env_vars() {
+        let content = build_wrapper_content(
+            "127.0.0.1",
+            28789,
+            "/glm",
+            "secret-token",
+            "/usr/bin/claude",
+            "MiniMax-M2.7",
+        );
+
+        assert!(content.contains("export ANTHROPIC_MODEL=\"$CLAIR_MODEL\""));
+        assert!(content.contains("export ANTHROPIC_DEFAULT_SONNET_MODEL=\"$CLAIR_MODEL\""));
+        assert!(content.contains("export ANTHROPIC_DEFAULT_OPUS_MODEL=\"$CLAIR_MODEL\""));
+        assert!(content.contains("export ANTHROPIC_DEFAULT_HAIKU_MODEL=\"$CLAIR_MODEL\""));
+        assert!(content.contains("CLAIR_BASE_URL=\"http://127.0.0.1:28789/glm\""));
+    }
 }
 
 #[cfg(windows)]

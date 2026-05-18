@@ -67,6 +67,37 @@ export interface TestProviderResult {
   streamingSupported?: boolean
 }
 
+export interface ProxyEvidenceEntry {
+  id: string
+  timestamp: string
+  requestPath: string
+  routePath?: string
+  profileName?: string
+  providerName?: string
+  providerType?: string
+  requestSource?: string
+  upstreamUrl?: string
+  originalModel?: string
+  rewrittenModel?: string
+  authResult: string
+  outcome: string
+  statusCode?: number
+  latencyMs?: number
+  error?: string
+}
+
+export interface TestProfileResult {
+  ok: boolean
+  latencyMs?: number
+  message: string
+  routePath: string
+  providerName: string
+  expectedModel: string
+  localUrl: string
+  statusCode?: number
+  evidence?: ProxyEvidenceEntry
+}
+
 export interface WrapperStatus {
   exists: boolean
   executable: boolean

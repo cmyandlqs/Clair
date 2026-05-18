@@ -1,11 +1,14 @@
 use crate::commands::proxy::ProxyState;
 use crate::db::Database;
 use crate::domain::Profile;
+use crate::proxy::server::{recent_evidence, ProxyEvidenceEntry};
 use crate::security::validation::{
     is_dangerous_command, is_reserved_route, is_valid_command_name, is_valid_route_path,
 };
+use crate::services::SettingsService;
 use chrono::Utc;
 use serde::Deserialize;
+use serde::Serialize;
 use tauri::State;
 use uuid::Uuid;
 
@@ -173,6 +176,148 @@ pub async fn set_default_profile(
     db.get_profile(&id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Profile not found".to_string())
+}
+
+#[derive(Debug, Serialize)]
+pub struct TestProfileResult {
+    pub ok: bool,
+    pub latency_ms: Option<u64>,
+    pub message: String,
+    pub route_path: String,
+    pub provider_name: String,
+    pub expected_model: String,
+    pub local_url: String,
+    pub status_code: Option<u16>,
+    pub evidence: Option<ProxyEvidenceEntry>,
+}
+
+#[tauri::command]
+pub async fn test_profile(
+    db: State<'_, Database>,
+    proxy_state: State<'_, ProxyState>,
+    profile_id: String,
+) -> Result<TestProfileResult, String> {
+    let profile = db
+        .get_profile(&profile_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Profile not found".to_string())?;
+    let provider = db
+        .get_provider(&profile.provider_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Provider not found".to_string())?;
+    let settings = SettingsService::load_settings(&db).map_err(|e| e.to_string())?;
+    let route_path = profile.route_path.clone();
+    let expected_model = profile.model.clone();
+    let provider_name = provider.name.clone();
+
+    let is_running = {
+        let guard = proxy_state.server.lock().unwrap();
+        guard.is_some()
+    };
+
+    let local_url = format!(
+        "http://{}:{}{}/v1/messages",
+        settings.proxy_host, settings.proxy_port, route_path
+    );
+
+    if !is_running {
+        return Ok(TestProfileResult {
+            ok: false,
+            latency_ms: None,
+            message: "Proxy is not running. Start proxy first.".to_string(),
+            route_path: route_path.clone(),
+            provider_name: provider_name.clone(),
+            expected_model: expected_model.clone(),
+            local_url: local_url.clone(),
+            status_code: None,
+            evidence: None,
+        });
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let request_body = serde_json::json!({
+        "model": expected_model.clone(),
+        "messages": [{"role": "user", "content": "Reply with ok."}],
+        "max_tokens": 8
+    });
+
+    let start = std::time::Instant::now();
+    let response = client
+        .post(&local_url)
+        .header("Content-Type", "application/json")
+        .header("x-api-key", settings.proxy_auth_token.clone())
+        .header("x-clair-source", "profile_test")
+        .body(request_body.to_string())
+        .send()
+        .await;
+    let latency_ms = start.elapsed().as_millis() as u64;
+
+    let evidence_store = {
+        let guard = proxy_state.evidence.lock().unwrap();
+        guard.clone()
+    };
+
+    let latest_evidence = recent_evidence(&evidence_store, 20)
+        .into_iter()
+        .rev()
+        .find(|entry| {
+            entry.route_path.as_deref() == Some(route_path.as_str())
+                && entry.request_source.as_deref() == Some("profile_test")
+        });
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            let ok = status.is_success();
+            let message = if ok {
+                "Profile route test succeeded".to_string()
+            } else {
+                let trimmed = text.chars().take(200).collect::<String>();
+                if trimmed.is_empty() {
+                    format!("Profile route test failed with HTTP {}", status.as_u16())
+                } else {
+                    format!(
+                        "Profile route test failed with HTTP {}: {}",
+                        status.as_u16(),
+                        trimmed
+                    )
+                }
+            };
+
+            Ok(TestProfileResult {
+                ok,
+                latency_ms: Some(latency_ms),
+                message,
+                route_path: route_path.clone(),
+                provider_name: provider_name.clone(),
+                expected_model: expected_model.clone(),
+                local_url: local_url.clone(),
+                status_code: Some(status.as_u16()),
+                evidence: latest_evidence,
+            })
+        }
+        Err(error) => Ok(TestProfileResult {
+            ok: false,
+            latency_ms: Some(latency_ms),
+            message: if error.is_timeout() {
+                "Profile route test timed out".to_string()
+            } else {
+                format!("Profile route test failed: {}", error)
+            },
+            route_path,
+            provider_name,
+            expected_model,
+            local_url,
+            status_code: None,
+            evidence: latest_evidence,
+        }),
+    }
 }
 
 fn validate_route_path(route: &str) -> Result<(), String> {

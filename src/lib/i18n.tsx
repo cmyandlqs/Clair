@@ -80,6 +80,7 @@ const translations: Record<Language, Record<string, string>> = {
     'profile.noProfilesHint': 'Profiles create commands like claude-glm',
     'profile.copyCommand': 'Copy Command',
     'profile.regenerateWrapper': 'Regenerate Wrapper',
+    'profile.testRoute': 'Test Profile Route',
     'profile.details': 'Profile Details',
     'profile.generating': 'Generating...',
 
@@ -91,6 +92,8 @@ const translations: Record<Language, Record<string, string>> = {
     'detail.route': 'Route',
     'detail.command': 'Command',
     'detail.provider': 'Provider',
+    'detail.runtimeModel': 'Runtime Model Mapping',
+    'detail.runtimeModelHint': 'Wrapper exports Anthropic model env vars from this profile. Use the evidence below to confirm the rewritten upstream model.',
     'detail.type': 'Type',
     'detail.authScheme': 'Auth Scheme',
     'detail.defaultModel': 'Default Model',
@@ -106,6 +109,9 @@ const translations: Record<Language, Record<string, string>> = {
     'detail.createProfile': 'Create Profile',
     'detail.profileCount': '{count} profile',
     'detail.profileCount_plural': '{count} profiles',
+    'detail.evidence': 'Runtime Evidence',
+    'detail.noEvidence': 'No requests captured for this profile yet',
+    'detail.modelRewrite': 'Model rewrite',
 
     // Settings
     'settings.settings': 'Settings',
@@ -224,6 +230,7 @@ const translations: Record<Language, Record<string, string>> = {
     'profile.noProfilesHint': 'Profile 会创建 claude-glm 这样的命令',
     'profile.copyCommand': '复制命令',
     'profile.regenerateWrapper': '重新生成 Wrapper',
+    'profile.testRoute': '测试 Profile 路由',
     'profile.details': 'Profile 详情',
     'profile.generating': '生成中...',
 
@@ -235,6 +242,8 @@ const translations: Record<Language, Record<string, string>> = {
     'detail.route': '路由',
     'detail.command': '命令',
     'detail.provider': 'Provider',
+    'detail.runtimeModel': '运行时模型映射',
+    'detail.runtimeModelHint': 'Wrapper 会把当前 Profile 的模型写入 Anthropic 相关环境变量，下面的证据可以确认真实改写后的上游模型。',
     'detail.type': '类型',
     'detail.authScheme': '认证方式',
     'detail.defaultModel': '默认模型',
@@ -250,6 +259,9 @@ const translations: Record<Language, Record<string, string>> = {
     'detail.createProfile': '创建 Profile',
     'detail.profileCount': '{count} 个 Profile',
     'detail.profileCount_plural': '{count} 个 Profile',
+    'detail.evidence': '运行证据',
+    'detail.noEvidence': '这个 Profile 还没有捕获到请求',
+    'detail.modelRewrite': '模型改写',
 
     // Settings
     'settings.settings': '设置',

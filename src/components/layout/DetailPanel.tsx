@@ -1,7 +1,7 @@
 import { Copy, RefreshCw, FileCode, Plus, Zap, CheckCircle, XCircle } from 'lucide-react'
 import { useProviders, useTestProvider, useUpdateProvider } from '@/hooks/useProviders'
-import { useProfiles, useGenerateWrapper } from '@/hooks/useProfiles'
-import { useProxyStatus } from '@/hooks/useProxyStatus'
+import { useProfiles, useGenerateWrapper, useTestProfile } from '@/hooks/useProfiles'
+import { useProxyStatus, useProxyEvidence } from '@/hooks/useProxyStatus'
 import { useUIStore } from '@/hooks/useUIStore'
 import { useState } from 'react'
 import { Badge } from '../common/Badge'
@@ -12,10 +12,13 @@ export function DetailPanel() {
   const { data: providers = [] } = useProviders()
   const { data: profiles = [] } = useProfiles()
   const { data: proxyStatus } = useProxyStatus()
+  const { data: proxyEvidence = [] } = useProxyEvidence(30)
   const testProvider = useTestProvider()
+  const testProfile = useTestProfile()
   const updateProvider = useUpdateProvider()
   const generateWrapper = useGenerateWrapper()
   const [testResult, setTestResult] = useState<string | null>(null)
+  const [profileTestResult, setProfileTestResult] = useState<string | null>(null)
   const [wrapperResult, setWrapperResult] = useState<{ success: boolean; message: string } | null>(null)
   const { t } = useI18n()
 
@@ -42,6 +45,24 @@ export function DetailPanel() {
     }
   }
 
+  const handleTestProfile = async (profileId: string) => {
+    try {
+      const result = await testProfile.mutateAsync(profileId)
+      const latency = result.latencyMs ?? '?'
+      const evidence = result.evidence
+      const rewriteSummary = evidence?.rewrittenModel
+        ? ` | rewrite: ${evidence.originalModel ?? '(none)'} -> ${evidence.rewrittenModel}`
+        : ''
+      setProfileTestResult(
+        result.ok
+          ? `${result.message} | ${latency}ms${rewriteSummary}`
+          : `${result.message}${rewriteSummary}`
+      )
+    } catch (error) {
+      setProfileTestResult(`Failed: ${error}`)
+    }
+  }
+
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId)
   const selectedProvider = providers.find((p) => p.id === selectedProviderId)
 
@@ -62,6 +83,10 @@ export function DetailPanel() {
     const baseUrl = proxyStatus?.running
       ? `http://${proxyStatus.host}:${proxyStatus.port}${selectedProfile.routePath}`
       : t('proxy.stopped')
+    const routeEvidence = proxyEvidence
+      .filter((entry) => entry.routePath === selectedProfile.routePath)
+      .slice(-5)
+      .reverse()
 
     return (
       <aside className="w-80 border-l border-[var(--border)] bg-[var(--surface)] overflow-auto">
@@ -99,7 +124,19 @@ export function DetailPanel() {
             <p>{provider?.name ?? 'Unknown'} · {selectedProfile.model}</p>
           </div>
 
+          <div>
+            <label className="label">{t('detail.runtimeModel')}</label>
+            <p className="text-sm text-[var(--text-muted)]">
+              {t('detail.runtimeModelHint')}
+            </p>
+          </div>
+
           <div className="pt-4 border-t border-[var(--border)]">
+            {profileTestResult && (
+              <div className="mb-3 p-2 rounded-lg text-sm bg-[var(--surface-muted)] text-[var(--text)]">
+                {profileTestResult}
+              </div>
+            )}
             {wrapperResult && (
               <div className={`mb-3 p-2 rounded-lg text-sm flex items-center gap-2 ${
                 wrapperResult.success
@@ -124,9 +161,45 @@ export function DetailPanel() {
               disabled={generateWrapper.isPending}
               className="w-full btn-primary mt-2 flex items-center justify-center gap-2"
             >
-              <RefreshCw className={`w-4 h-4 ${generateWrapper.isPending ? 'animate-spin' : ''}`} />
-              {generateWrapper.isPending ? t('detail.generating') : t('detail.regenerate')}
+                <RefreshCw className={`w-4 h-4 ${generateWrapper.isPending ? 'animate-spin' : ''}`} />
+                {generateWrapper.isPending ? t('detail.generating') : t('detail.regenerate')}
+              </button>
+            <button
+              onClick={() => handleTestProfile(selectedProfile.id)}
+              disabled={testProfile.isPending}
+              className="w-full btn-secondary mt-2 flex items-center justify-center gap-2"
+            >
+              <Zap className={`w-4 h-4 ${testProfile.isPending ? 'animate-pulse' : ''}`} />
+              {testProfile.isPending ? t('detail.testing') : t('profile.testRoute')}
             </button>
+          </div>
+
+          <div className="pt-4 border-t border-[var(--border)]">
+            <label className="label">{t('detail.evidence')}</label>
+            {routeEvidence.length === 0 ? (
+              <p className="text-sm text-[var(--text-muted)]">{t('detail.noEvidence')}</p>
+            ) : (
+              <div className="space-y-2">
+                {routeEvidence.map((entry) => (
+                  <div key={entry.id} className="rounded-lg bg-[var(--surface-muted)] p-3 text-xs space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{entry.outcome}</span>
+                      <span className="text-[var(--text-muted)]">
+                        {new Date(entry.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                    <div>{entry.providerName ?? provider?.name ?? 'Unknown'} · {entry.statusCode ?? '-'}</div>
+                    <div className="break-all">{entry.upstreamUrl ?? entry.requestPath}</div>
+                    <div>
+                      {t('detail.modelRewrite')}: {entry.originalModel ?? '(none)'} {'->'} {entry.rewrittenModel ?? '(none)'}
+                    </div>
+                    {entry.error && (
+                      <div className="text-[var(--error)] break-all">{entry.error}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </aside>

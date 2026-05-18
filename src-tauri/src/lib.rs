@@ -2,9 +2,9 @@ mod commands;
 mod db;
 mod domain;
 mod proxy;
+mod security;
 mod services;
 mod utils;
-mod security;
 
 use db::Database;
 use std::path::PathBuf;
@@ -54,12 +54,14 @@ pub fn run() {
             commands::profile::update_profile,
             commands::profile::delete_profile,
             commands::profile::set_default_profile,
+            commands::profile::test_profile,
             // Proxy commands
             commands::proxy::get_proxy_status,
             commands::proxy::start_proxy,
             commands::proxy::stop_proxy,
             commands::proxy::restart_proxy,
             commands::proxy::reload_proxy_config,
+            commands::proxy::get_proxy_evidence,
             // Wrapper commands
             commands::wrapper::detect_claude_binary,
             commands::wrapper::generate_wrapper,

@@ -8,12 +8,19 @@ use axum::{
     routing::get,
     Router,
 };
-use std::{collections::HashMap, sync::Arc};
+use chrono::Utc;
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::{Arc, Mutex},
+};
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 use uuid::Uuid;
 
 const MAX_REQUEST_BODY: usize = 10_000_000;
+const MAX_EVIDENCE_ENTRIES: usize = 200;
+
+pub type EvidenceStore = Arc<Mutex<VecDeque<ProxyEvidenceEntry>>>;
 
 #[derive(Clone)]
 pub struct ProxyServer {
@@ -45,6 +52,7 @@ impl ProxyServer {
 #[derive(Clone)]
 struct ProxyServerState {
     server: Arc<RwLock<ProxyServer>>,
+    evidence: EvidenceStore,
 }
 
 impl ProxyServer {
@@ -74,8 +82,8 @@ impl ProxyServer {
         })
     }
 
-    pub fn build_router(server: Arc<RwLock<ProxyServer>>) -> Router {
-        let state = ProxyServerState { server };
+    pub fn build_router(server: Arc<RwLock<ProxyServer>>, evidence: EvidenceStore) -> Router {
+        let state = ProxyServerState { server, evidence };
 
         Router::new()
             .route("/health", get(Self::health_handler))
@@ -105,6 +113,11 @@ impl ProxyServer {
         let method = request.method().clone();
         let path = request.uri().path().to_string();
         let path_trimmed = path.trim_start_matches('/');
+        let request_source = request
+            .headers()
+            .get("x-clair-source")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
         let request_headers = request.headers();
 
         info!(path = %path, method = %method, "Incoming proxy request");
@@ -115,6 +128,16 @@ impl ProxyServer {
             .collect();
         if parts.is_empty() {
             warn!(path = %path, "Empty route path");
+            record_evidence(
+                &state.evidence,
+                ProxyEvidenceEntry::rejected(
+                    path,
+                    None,
+                    request_source,
+                    "missing_route",
+                    "Empty route path".to_string(),
+                ),
+            );
             return json_error_response(
                 StatusCode::NOT_FOUND,
                 "route_not_found",
@@ -132,6 +155,16 @@ impl ProxyServer {
                 Some(token) if token == server.auth_token => {}
                 Some(_) => {
                     warn!(path = %path, "Auth failed: invalid auth token");
+                    record_evidence(
+                        &state.evidence,
+                        ProxyEvidenceEntry::rejected(
+                            path.clone(),
+                            Some(route.clone()),
+                            request_source.clone(),
+                            "invalid_auth",
+                            "Invalid auth token".to_string(),
+                        ),
+                    );
                     return json_error_response(
                         StatusCode::UNAUTHORIZED,
                         "unauthorized",
@@ -140,6 +173,16 @@ impl ProxyServer {
                 }
                 None => {
                     warn!(path = %path, "Auth failed: missing auth token");
+                    record_evidence(
+                        &state.evidence,
+                        ProxyEvidenceEntry::rejected(
+                            path.clone(),
+                            Some(route.clone()),
+                            request_source.clone(),
+                            "missing_auth",
+                            "Missing auth token".to_string(),
+                        ),
+                    );
                     return json_error_response(
                         StatusCode::UNAUTHORIZED,
                         "unauthorized",
@@ -157,6 +200,20 @@ impl ProxyServer {
                         .map(|p| p.route_path.as_str())
                         .collect();
                     warn!(path = %path, route = %route, available_routes = ?available, "No profile matched route");
+                    record_evidence(
+                        &state.evidence,
+                        ProxyEvidenceEntry::rejected(
+                            path.clone(),
+                            Some(route.clone()),
+                            request_source.clone(),
+                            "profile_not_found",
+                            format!(
+                                "No profile for route: {} (available: {})",
+                                route,
+                                available.join(", ")
+                            ),
+                        ),
+                    );
                     return json_error_response(
                         StatusCode::NOT_FOUND,
                         "profile_not_found",
@@ -173,6 +230,16 @@ impl ProxyServer {
                 Some(p) => p.clone(),
                 None => {
                     warn!(route = %route, provider_id = %profile.provider_id, "Provider not found for profile");
+                    record_evidence(
+                        &state.evidence,
+                        ProxyEvidenceEntry::rejected(
+                            path.clone(),
+                            Some(route.clone()),
+                            request_source.clone(),
+                            "provider_not_found",
+                            "Provider not found for profile".to_string(),
+                        ),
+                    );
                     return json_error_response(
                         StatusCode::NOT_FOUND,
                         "provider_not_found",
@@ -204,7 +271,7 @@ impl ProxyServer {
         match &result {
             Ok(resp) => info!(
                 request_id = %request_id,
-                status = %resp.status(),
+                status = %resp.status_code,
                 latency_ms = latency_ms,
                 "Request completed"
             ),
@@ -217,8 +284,52 @@ impl ProxyServer {
         }
 
         match result {
-            Ok(response) => response,
+            Ok(response) => {
+                record_evidence(
+                    &state.evidence,
+                    ProxyEvidenceEntry {
+                        id: request_id,
+                        timestamp: Utc::now().to_rfc3339(),
+                        request_path: path,
+                        route_path: Some(route),
+                        profile_name: Some(profile.name),
+                        provider_name: Some(provider.name),
+                        provider_type: Some(provider.provider_type.to_string()),
+                        request_source,
+                        upstream_url: Some(upstream_url),
+                        original_model: response.original_model.clone(),
+                        rewritten_model: response.rewritten_model.clone(),
+                        auth_result: "ok".to_string(),
+                        outcome: "success".to_string(),
+                        status_code: Some(response.status_code),
+                        latency_ms: Some(latency_ms),
+                        error: None,
+                    },
+                );
+                response.response
+            }
             Err(e) => {
+                record_evidence(
+                    &state.evidence,
+                    ProxyEvidenceEntry {
+                        id: request_id,
+                        timestamp: Utc::now().to_rfc3339(),
+                        request_path: path,
+                        route_path: Some(route),
+                        profile_name: Some(profile.name),
+                        provider_name: Some(provider.name),
+                        provider_type: Some(provider.provider_type.to_string()),
+                        request_source,
+                        upstream_url: Some(upstream_url),
+                        original_model: None,
+                        rewritten_model: None,
+                        auth_result: "ok".to_string(),
+                        outcome: "upstream_error".to_string(),
+                        status_code: Some(StatusCode::BAD_GATEWAY.as_u16()),
+                        latency_ms: Some(latency_ms),
+                        error: Some(e.clone()),
+                    },
+                );
                 let error_body = serde_json::json!({
                     "type": "error",
                     "error": {
@@ -283,7 +394,7 @@ async fn forward_request(
     provider: &Provider,
     profile: &Profile,
     request: Request<Body>,
-) -> Result<Response, String> {
+) -> Result<ForwardResponse, String> {
     let method = request.method().clone();
     let mut req_builder = client.request(method.clone(), upstream_url);
 
@@ -320,16 +431,7 @@ async fn forward_request(
         .map_err(|e| format!("Failed to read request body: {}", e))?
         .to_vec();
 
-    let body = if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&body) {
-        if json.get("model").is_some() {
-            json["model"] = serde_json::Value::String(profile.model.clone());
-            serde_json::to_vec(&json).map_err(|e| e.to_string())?
-        } else {
-            body
-        }
-    } else {
-        body
-    };
+    let (body, original_model, rewritten_model) = rewrite_model_in_body(body, &profile.model)?;
 
     req_builder = req_builder.body(body);
 
@@ -363,9 +465,16 @@ async fn forward_request(
         builder = builder.header("content-type", "application/json");
     }
 
-    builder
+    let response = builder
         .body(Body::from_stream(stream))
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    Ok(ForwardResponse {
+        response,
+        status_code: status.as_u16(),
+        original_model,
+        rewritten_model,
+    })
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -373,6 +482,107 @@ pub struct ActiveRoute {
     pub route_path: String,
     pub profile_name: String,
     pub provider_name: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProxyEvidenceEntry {
+    pub id: String,
+    pub timestamp: String,
+    pub request_path: String,
+    pub route_path: Option<String>,
+    pub profile_name: Option<String>,
+    pub provider_name: Option<String>,
+    pub provider_type: Option<String>,
+    pub request_source: Option<String>,
+    pub upstream_url: Option<String>,
+    pub original_model: Option<String>,
+    pub rewritten_model: Option<String>,
+    pub auth_result: String,
+    pub outcome: String,
+    pub status_code: Option<u16>,
+    pub latency_ms: Option<u64>,
+    pub error: Option<String>,
+}
+
+impl ProxyEvidenceEntry {
+    fn rejected(
+        request_path: String,
+        route_path: Option<String>,
+        request_source: Option<String>,
+        auth_result: &str,
+        error: String,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            timestamp: Utc::now().to_rfc3339(),
+            request_path,
+            route_path,
+            profile_name: None,
+            provider_name: None,
+            provider_type: None,
+            request_source,
+            upstream_url: None,
+            original_model: None,
+            rewritten_model: None,
+            auth_result: auth_result.to_string(),
+            outcome: "rejected".to_string(),
+            status_code: None,
+            latency_ms: None,
+            error: Some(error),
+        }
+    }
+}
+
+struct ForwardResponse {
+    response: Response,
+    status_code: u16,
+    original_model: Option<String>,
+    rewritten_model: Option<String>,
+}
+
+pub fn recent_evidence(evidence: &EvidenceStore, limit: usize) -> Vec<ProxyEvidenceEntry> {
+    let guard = evidence.lock().unwrap();
+    let take = limit.min(guard.len());
+    guard
+        .iter()
+        .rev()
+        .take(take)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+fn record_evidence(evidence: &EvidenceStore, entry: ProxyEvidenceEntry) {
+    let mut guard = evidence.lock().unwrap();
+    if guard.len() >= MAX_EVIDENCE_ENTRIES {
+        guard.pop_front();
+    }
+    guard.push_back(entry);
+}
+
+fn rewrite_model_in_body(
+    body: Vec<u8>,
+    target_model: &str,
+) -> Result<(Vec<u8>, Option<String>, Option<String>), String> {
+    if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&body) {
+        if let Some(original_model) = json
+            .get("model")
+            .and_then(|value| value.as_str())
+            .map(|s| s.to_string())
+        {
+            json["model"] = serde_json::Value::String(target_model.to_string());
+            let rewritten = serde_json::to_vec(&json).map_err(|e| e.to_string())?;
+            return Ok((
+                rewritten,
+                Some(original_model),
+                Some(target_model.to_string()),
+            ));
+        }
+    }
+
+    Ok((body, None, None))
 }
 
 fn json_error_response(status: StatusCode, error_type: &str, message: &str) -> Response {
@@ -559,7 +769,10 @@ mod integration_tests {
     #[tokio::test]
     async fn test_fallback_catches_minimax_route() {
         let server = create_test_server();
-        let app = ProxyServer::build_router(Arc::new(RwLock::new(server)));
+        let app = ProxyServer::build_router(
+            Arc::new(RwLock::new(server)),
+            Arc::new(Mutex::new(VecDeque::new())),
+        );
 
         let response = app
             .oneshot(
@@ -598,7 +811,10 @@ mod integration_tests {
     #[tokio::test]
     async fn test_health_works() {
         let server = create_test_server();
-        let app = ProxyServer::build_router(Arc::new(RwLock::new(server)));
+        let app = ProxyServer::build_router(
+            Arc::new(RwLock::new(server)),
+            Arc::new(Mutex::new(VecDeque::new())),
+        );
 
         let response = app
             .oneshot(
@@ -616,7 +832,10 @@ mod integration_tests {
     #[tokio::test]
     async fn test_missing_auth_is_rejected() {
         let server = create_test_server();
-        let app = ProxyServer::build_router(Arc::new(RwLock::new(server)));
+        let app = ProxyServer::build_router(
+            Arc::new(RwLock::new(server)),
+            Arc::new(Mutex::new(VecDeque::new())),
+        );
 
         let response = app
             .oneshot(

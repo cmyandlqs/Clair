@@ -6,6 +6,7 @@ import {
   deleteProfile,
   setDefaultProfile,
   generateWrapper,
+  testProfile,
   reloadProxyConfig,
 } from '@/lib/api'
 import type { CreateProfileInput, UpdateProfileInput } from '@/lib/api'
@@ -69,5 +70,16 @@ export function useSetDefaultProfile() {
 export function useGenerateWrapper() {
   return useMutation({
     mutationFn: (profileId: string) => generateWrapper(profileId),
+  })
+}
+
+export function useTestProfile() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (profileId: string) => testProfile(profileId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['proxyEvidence'] })
+    },
   })
 }

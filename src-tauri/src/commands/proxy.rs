@@ -1,10 +1,15 @@
 use crate::db::Database;
 use crate::domain::AppSettings;
-use crate::proxy::server::ActiveRoute as ProxyActiveRoute;
+use crate::proxy::server::{
+    recent_evidence, ActiveRoute as ProxyActiveRoute, EvidenceStore, ProxyEvidenceEntry,
+};
 use crate::proxy::ProxyServer;
 use crate::services::SettingsService;
 use serde::Serialize;
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Serialize)]
@@ -18,6 +23,7 @@ pub struct ProxyStatus {
 pub struct ProxyState {
     pub server: Mutex<Option<Arc<RwLock<ProxyServer>>>>,
     pub shutdown_tx: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    pub evidence: Mutex<EvidenceStore>,
 }
 
 impl ProxyState {
@@ -25,6 +31,7 @@ impl ProxyState {
         Self {
             server: Mutex::new(None),
             shutdown_tx: Mutex::new(None),
+            evidence: Mutex::new(Arc::new(Mutex::new(VecDeque::new()))),
         }
     }
 }
@@ -89,9 +96,11 @@ pub async fn start_proxy(
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     let server_arc = Arc::new(RwLock::new(server));
     let server_clone = server_arc.clone();
+    let evidence_store: EvidenceStore = Arc::new(Mutex::new(VecDeque::new()));
+    let evidence_clone = evidence_store.clone();
 
     tokio::spawn(async move {
-        let app = ProxyServer::build_router(server_clone).into_make_service();
+        let app = ProxyServer::build_router(server_clone, evidence_clone).into_make_service();
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 rx.await.ok();
@@ -106,6 +115,9 @@ pub async fn start_proxy(
     }
     {
         *state.shutdown_tx.lock().unwrap() = Some(tx);
+    }
+    {
+        *state.evidence.lock().unwrap() = evidence_store;
     }
 
     tracing::info!(host = %host, port = %port, "Proxy server started");
@@ -152,6 +164,19 @@ pub async fn restart_proxy(
 ) -> Result<ProxyStatus, String> {
     stop_server(&state);
     start_proxy(state, db).await
+}
+
+#[tauri::command]
+pub async fn get_proxy_evidence(
+    state: tauri::State<'_, ProxyState>,
+    limit: Option<usize>,
+) -> Result<Vec<ProxyEvidenceEntry>, String> {
+    let evidence = {
+        let guard = state.evidence.lock().unwrap();
+        guard.clone()
+    };
+
+    Ok(recent_evidence(&evidence, limit.unwrap_or(20).min(100)))
 }
 
 fn stop_server(state: &tauri::State<'_, ProxyState>) {
