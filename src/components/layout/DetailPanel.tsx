@@ -1,0 +1,234 @@
+import { Copy, RefreshCw, FileCode, Plus, Zap, CheckCircle, XCircle } from 'lucide-react'
+import { useProviders, useTestProvider, useUpdateProvider } from '@/hooks/useProviders'
+import { useProfiles, useGenerateWrapper } from '@/hooks/useProfiles'
+import { useProxyStatus } from '@/hooks/useProxyStatus'
+import { useUIStore } from '@/hooks/useUIStore'
+import { useState } from 'react'
+import { Badge } from '../common/Badge'
+import { useI18n } from '@/lib/i18n'
+
+export function DetailPanel() {
+  const { selectedProfileId, selectedProviderId, openModal } = useUIStore()
+  const { data: providers = [] } = useProviders()
+  const { data: profiles = [] } = useProfiles()
+  const { data: proxyStatus } = useProxyStatus()
+  const testProvider = useTestProvider()
+  const updateProvider = useUpdateProvider()
+  const generateWrapper = useGenerateWrapper()
+  const [testResult, setTestResult] = useState<string | null>(null)
+  const [wrapperResult, setWrapperResult] = useState<{ success: boolean; message: string } | null>(null)
+  const { t } = useI18n()
+
+  const handleTestProvider = async () => {
+    if (!selectedProviderId) return
+    try {
+      const result = await testProvider.mutateAsync(selectedProviderId)
+      setTestResult(result.ok ? t('provider.connected', { latency: String(result.latencyMs ?? '?'), model: result.model ?? '' }) : `${t('provider.connectionFailed')}: ${result.message}`)
+      if (result.ok) {
+        updateProvider.mutate({ id: selectedProviderId, status: 'ready' })
+      }
+    } catch {
+      setTestResult(t('error.connectionFailed'))
+    }
+  }
+
+  const handleGenerateWrapper = async (profileId: string) => {
+    try {
+      setWrapperResult(null)
+      const result = await generateWrapper.mutateAsync(profileId)
+      setWrapperResult({ success: true, message: `Generated: ${result.path}` })
+    } catch (error) {
+      setWrapperResult({ success: false, message: `Failed: ${error}` })
+    }
+  }
+
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId)
+  const selectedProvider = providers.find((p) => p.id === selectedProviderId)
+
+  if (!selectedProfile && !selectedProvider) {
+    return (
+      <aside className="w-80 border-l border-[var(--border)] bg-[var(--surface)] flex items-center justify-center">
+        <div className="text-center text-[var(--text-muted)]">
+          <FileCode className="w-10 h-10 mx-auto mb-3 opacity-30" />
+          <p className="text-sm">{t('detail.selectProfileOrProvider')}</p>
+          <p className="text-xs mt-1">{t('detail.toSeeDetails')}</p>
+        </div>
+      </aside>
+    )
+  }
+
+  if (selectedProfile) {
+    const provider = providers.find((p) => p.id === selectedProfile.providerId)
+    const baseUrl = proxyStatus?.running
+      ? `http://${proxyStatus.host}:${proxyStatus.port}${selectedProfile.routePath}`
+      : t('proxy.stopped')
+
+    return (
+      <aside className="w-80 border-l border-[var(--border)] bg-[var(--surface)] overflow-auto">
+        <div className="p-4 border-b border-[var(--border)]">
+          <h2 className="font-semibold">{t('profile.details')}</h2>
+        </div>
+
+        <div className="p-4 space-y-4">
+          <div>
+            <label className="label">{t('detail.name')}</label>
+            <p className="text-lg font-medium">{selectedProfile.name}</p>
+          </div>
+
+          <div>
+            <label className="label">{t('detail.route')}</label>
+            <p className="font-mono text-sm bg-[var(--surface-muted)] px-3 py-2 rounded-lg">
+              {baseUrl}
+            </p>
+          </div>
+
+          <div>
+            <label className="label">{t('detail.command')}</label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 font-mono text-sm bg-[var(--surface-muted)] px-3 py-2 rounded-lg">
+                {selectedProfile.commandName}
+              </code>
+              <button className="p-2 rounded-lg hover:bg-[var(--surface-muted)] transition-colors">
+                <Copy className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="label">{t('detail.provider')}</label>
+            <p>{provider?.name ?? 'Unknown'} · {selectedProfile.model}</p>
+          </div>
+
+          <div className="pt-4 border-t border-[var(--border)]">
+            {wrapperResult && (
+              <div className={`mb-3 p-2 rounded-lg text-sm flex items-center gap-2 ${
+                wrapperResult.success
+                  ? 'bg-[var(--success)]/10 text-[var(--success)]'
+                  : 'bg-[var(--error)]/10 text-[var(--error)]'
+              }`}>
+                {wrapperResult.success ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                {wrapperResult.message}
+              </div>
+            )}
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(selectedProfile.commandName)
+              }}
+              className="w-full btn-secondary flex items-center justify-center gap-2"
+            >
+              <Copy className="w-4 h-4" />
+              {t('detail.copyCommand')}
+            </button>
+            <button
+              onClick={() => handleGenerateWrapper(selectedProfile.id)}
+              disabled={generateWrapper.isPending}
+              className="w-full btn-primary mt-2 flex items-center justify-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${generateWrapper.isPending ? 'animate-spin' : ''}`} />
+              {generateWrapper.isPending ? t('detail.generating') : t('detail.regenerate')}
+            </button>
+          </div>
+        </div>
+      </aside>
+    )
+  }
+
+  if (selectedProvider) {
+    const isReady = selectedProvider.status === 'ready'
+    const profileCount = profiles.filter(p => p.providerId === selectedProvider.id).length
+
+    return (
+      <aside className="w-80 border-l border-[var(--border)] bg-[var(--surface)] overflow-auto">
+        <div className="p-4 border-b border-[var(--border)]">
+          <h2 className="font-semibold">{t('provider.details')}</h2>
+        </div>
+
+        <div className="p-4 space-y-4">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center text-[var(--primary)] font-semibold">
+              {selectedProvider.name.charAt(0)}
+            </div>
+            <div>
+              <p className="font-medium">{selectedProvider.name}</p>
+              <Badge status={selectedProvider.status} />
+            </div>
+          </div>
+
+          <div>
+            <label className="label">{t('provider.baseUrl')}</label>
+            <p className="font-mono text-sm">{selectedProvider.baseUrl}</p>
+          </div>
+
+          <div>
+            <label className="label">{t('detail.type')}</label>
+            <p>{selectedProvider.type}</p>
+          </div>
+
+          <div>
+            <label className="label">{t('detail.authScheme')}</label>
+            <p>{selectedProvider.authScheme}</p>
+          </div>
+
+          <div>
+            <label className="label">{t('detail.defaultModel')}</label>
+            <p>{selectedProvider.defaultModel}</p>
+          </div>
+
+          {selectedProvider.lastTestedAt && (
+            <div>
+              <label className="label">{t('detail.lastTested')}</label>
+              <p className="text-sm text-[var(--text-muted)]">
+                {new Date(selectedProvider.lastTestedAt).toLocaleString()}
+              </p>
+            </div>
+          )}
+
+          {isReady && (
+            <div className="rounded-xl bg-gradient-to-r from-[var(--primary)]/5 to-[var(--success)]/5 p-4 border border-[var(--primary)]/20">
+              <div className="flex items-center gap-2 mb-2">
+                <Zap className="w-4 h-4 text-[var(--primary)]" />
+                <span className="font-medium text-sm">{t('detail.providerReady')}</span>
+              </div>
+              <p className="text-xs text-[var(--text-secondary)] mb-3">
+                {t('detail.nextStep')}
+              </p>
+              <button
+                onClick={() => openModal('addProfile')}
+                className="w-full btn-primary flex items-center justify-center gap-2 text-sm py-2"
+              >
+                <Plus className="w-4 h-4" />
+                {t('detail.createProfile')}
+              </button>
+              {profileCount > 0 && (
+                <p className="text-xs text-center text-[var(--text-muted)] mt-2">
+                  {t('detail.alreadyUsing', { count: String(profileCount) })}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="pt-4 border-t border-[var(--border)]">
+            {testResult && (
+              <div className={`mb-3 p-2 rounded-lg text-sm ${
+                testResult.startsWith(t('provider.connected').substring(0, 5))
+                  ? 'bg-[var(--success)]/10 text-[var(--success)]'
+                  : 'bg-[var(--error)]/10 text-[var(--error)]'
+              }`}>
+                {testResult}
+              </div>
+            )}
+            <button
+              onClick={handleTestProvider}
+              disabled={testProvider.isPending}
+              className="w-full btn-secondary flex items-center justify-center gap-2"
+            >
+              {testProvider.isPending ? t('detail.testing') : t('testConnection')}
+            </button>
+          </div>
+        </div>
+      </aside>
+    )
+  }
+
+  return null
+}

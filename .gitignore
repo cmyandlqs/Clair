@@ -1,0 +1,40 @@
+# Rust / Cargo
+target/
+Cargo.lock
+
+# Tauri
+src-tauri/target/
+src-tauri/*.log
+
+# Node
+node_modules/
+dist/
+dist-srv/
+.yarn/
+.npm/
+.eslintcache
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+.vscode/
+
+# Environment (secrets)
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+*.exe
+*.dmg
+*.msi

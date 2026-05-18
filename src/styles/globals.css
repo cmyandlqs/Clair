@@ -1,0 +1,215 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* ========== 背景层 ========== */
+  --background: #F9F9F9;
+  --background-subtle: #F3F3F3;
+  --canvas: #FDFBFA;
+
+  /* ========== 表面层 ========== */
+  --surface: #FFFFFF;
+  --surface-elevated: #FFFFFF;
+  --surface-muted: #F5F5F5;
+
+  /* ========== 主色调 (Orange/Coral) ========== */
+  --primary: #E67E50;
+  --primary-hover: #D66A3A;
+  --primary-active: #C85A2A;
+  --primary-soft: #FFF0E8;
+  --primary-border: #FFCDB8;
+
+  /* ========== 语义色 ========== */
+  --success: #52C41A;
+  --success-soft: #F6FFED;
+  --warning: #FAAD14;
+  --warning-soft: #FFFBE6;
+  --error: #FF4D4F;
+  --error-soft: #FFF1F0;
+  --info: #1890FF;
+
+  /* ========== 文字层 ========== */
+  --text-primary: #1A1A1A;
+  --text-secondary: #666666;
+  --text-muted: #999999;
+  --text-hint: #A0A0A0;
+
+  /* ========== 边框层 ========== */
+  --border: #EDEDED;
+  --border-strong: #E0E0E0;
+  --border-active: #E67E50;
+
+  /* ========== 阴影 ========== */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.08);
+  --shadow-inner: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+html, body {
+  background: var(--background);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "PingFang SC", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer components {
+  /* ========== 卡片 ========== */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.15s ease-out;
+  }
+
+  .card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+
+  .card.selected {
+    border: 2px solid var(--primary);
+    background: var(--primary-soft);
+  }
+
+  /* ========== 按钮 ========== */
+  .btn-primary {
+    background: var(--primary);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.15s ease-out;
+  }
+
+  .btn-primary:hover {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:active {
+    background: var(--primary-active);
+    transform: scale(0.98);
+  }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.15s ease-out;
+  }
+
+  .btn-secondary:hover {
+    background: var(--surface-muted);
+    border-color: var(--border-strong);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 8px 12px;
+    border-radius: 8px;
+    transition: all 0.15s ease-out;
+  }
+
+  .btn-ghost:hover {
+    background: var(--surface-muted);
+  }
+
+  /* ========== 输入框 ========== */
+  .input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--text-primary);
+    transition: all 0.15s ease-out;
+  }
+
+  .input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-soft);
+  }
+
+  .input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+  }
+
+  /* ========== 徽章 ========== */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .badge-success {
+    background: var(--success-soft);
+    color: var(--success);
+  }
+
+  .badge-warning {
+    background: var(--warning-soft);
+    color: var(--warning);
+  }
+
+  .badge-error {
+    background: var(--error-soft);
+    color: var(--error);
+  }
+
+  .badge-primary {
+    background: var(--primary-soft);
+    color: var(--primary);
+  }
+
+  /* ========== 侧边栏项 ========== */
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    color: var(--text-secondary);
+    transition: all 0.15s ease-out;
+    cursor: pointer;
+  }
+
+  .sidebar-item:hover {
+    background: var(--surface-muted);
+    color: var(--text-primary);
+    transform: translateX(2px);
+  }
+
+  .sidebar-item.active {
+    background: var(--primary-soft);
+    color: var(--primary);
+  }
+
+  .sidebar-item .icon {
+    width: 18px;
+    height: 18px;
+    stroke-width: 1.5;
+  }
+}

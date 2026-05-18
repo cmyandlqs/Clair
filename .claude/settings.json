@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(file /home/sikm/Project/AI-Project/clair/UI参考/*.png)",
+      "Skill(tavily-extract)",
+      "Skill(tavily-extract:*)",
+      "Bash(curl -sL -o img1.jpeg \"https://minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com/ccv2%2F2026-05-17%2FMiniMax-M2.7%2F2039481895820992731%2Ffd859b5362a3f58e880f0810b8ac6f0a05da715e7853995c53666f7f50ae5c1e..jpeg\")",
+      "Bash(curl -sL -o img2.jpeg \"https://minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com/ccv2%2F2026-05-17%2FMiniMax-M2.7%2F2039481895820992731%2F0bbaa71185ef14134d9879e36469941348e2848005169be63cf617be56886b4e..jpeg\")",
+      "Bash(curl -sL -o img3.jpeg \"https://minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com/ccv2%2F2026-05-17%2FMiniMax-M2.7%2F2039481895820992731%2Fee6021973a41401e9b943e2ea90b65f427a70d8b68f5143482d88509686eb961..jpeg\")",
+      "Bash(curl -sL -o img4.jpeg \"https://minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com/ccv2%2F2026-05-17%2FMiniMax-M2.7%2F2039481895820992731%2Fcd7757971e93cabfef3a055188ec03d6526f1103729c49970ad5cf586fe7ade9..jpeg\")"
+    ]
+  }
+}
