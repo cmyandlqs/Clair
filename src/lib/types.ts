@@ -104,6 +104,16 @@ export interface WrapperStatus {
   path?: string
   inPath: boolean
   stale: boolean
+  settingsPath?: string
+  settingsExists: boolean
+}
+
+export interface WrapperPathDiagnostics {
+  configuredDir: string
+  resolvedDir: string
+  inPath: boolean
+  matchingEntries: string[]
+  pathEntries: string[]
 }
 
 export interface ClaudeBinaryDetection {
@@ -112,8 +122,18 @@ export interface ClaudeBinaryDetection {
   candidates: string[]
 }
 
+export interface ClaudeBinaryVerification {
+  configuredPath?: string
+  resolvedPath?: string
+  source: string
+  runnable: boolean
+  version?: string
+  message: string
+}
+
 export interface GenerateWrapperResult {
   success: boolean
   path: string
+  settingsPath?: string
   commandName: string
 }

@@ -64,6 +64,8 @@ pub fn run() {
             commands::proxy::get_proxy_evidence,
             // Wrapper commands
             commands::wrapper::detect_claude_binary,
+            commands::wrapper::verify_claude_binary,
+            commands::wrapper::get_wrapper_path_diagnostics,
             commands::wrapper::generate_wrapper,
             commands::wrapper::generate_all_wrappers,
             commands::wrapper::check_wrapper_status,

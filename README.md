@@ -213,3 +213,61 @@ cargo tauri build    # 生产打包
 ## License
 
 MIT
+
+---
+
+## Linux 重构计划：Wrapper 改用 `--settings` 方案
+
+### 背景
+
+当前 Linux wrapper 使用 `export` 环境变量 + `exec claude` 的方式启动 Claude Code。但实测发现 Claude Code **不尊重 `ANTHROPIC_MODEL` 等环境变量来选择模型**，导致启动后模型仍是默认值。
+
+Windows 方案使用 `claude --settings <profile.settings.json>` 方式，通过 settings 文件的 `env` 字段注入环境变量，经过验证可靠工作。
+
+### 方案
+
+Linux wrapper 也改为 `--settings` 方案，与 Windows 保持一致：
+
+**之前（Linux，环境变量方案，不可靠）：**
+```bash
+#!/usr/bin/env bash
+export ANTHROPIC_BASE_URL="http://127.0.0.1:28789/glm"
+export ANTHROPIC_MODEL="glm-4.7"
+exec claude "$@"
+```
+
+**之后（Linux，--settings 方案，与 Windows 一致）：**
+```bash
+#!/usr/bin/env bash
+exec claude --settings ~/.local/bin/profiles/claude-glm.settings.json "$@"
+```
+
+```json
+// ~/.local/bin/profiles/claude-glm.settings.json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:28789/glm",
+    "ANTHROPIC_AUTH_TOKEN": "clair-xxx",
+    "ANTHROPIC_MODEL": "glm-4.7",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-4.7",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-4.7",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.7"
+  }
+}
+```
+
+### 需要修改的文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `src-tauri/src/services/wrapper_service.rs` | `build_unix_wrapper_content` 改为 `--settings` 调用；`wrapper_settings_path` Linux 也返回路径；`build_wrapper_artifacts` Unix 也生成 settings JSON |
+| `src/lib/i18n.tsx` | 更新 `detail.runtimeModelHint` 提示文案 |
+
+### 验收标准
+
+1. `cargo check` 通过
+2. `cargo test` 通过
+3. `npm run build` 通过
+4. 生成的 wrapper 脚本调用 `claude --settings <path>`
+5. 生成的 settings JSON 文件包含正确的 `env` 字段
+6. `claude-glm2` 启动后 Claude Code 显示正确的模型

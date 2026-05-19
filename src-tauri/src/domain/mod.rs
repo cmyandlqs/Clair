@@ -1,7 +1,7 @@
-pub mod provider;
 pub mod profile;
+pub mod provider;
 pub mod settings;
 
-pub use provider::{Provider, ProviderType, AuthScheme, ProviderStatus};
 pub use profile::Profile;
+pub use provider::{AuthScheme, Provider, ProviderStatus, ProviderType};
 pub use settings::AppSettings;

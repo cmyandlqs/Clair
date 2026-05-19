@@ -8,7 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Architecture: Claude Code → Clair local proxy (127.0.0.1:28789) → Multiple Provider backends
 
-Users generate wrapper scripts (e.g., `claude-glm`, `claude-minimax`) that set environment variables to route requests through Clair's local proxy.
+Users generate wrapper scripts (e.g., `claude-glm`, `claude-minimax`) that launch Claude Code with per-profile `--settings` files to route requests through Clair's local proxy.
+
+**Branches**: `main` (Windows, NSIS), `linux-dev` (Linux, deb/appimage). Both use `--settings` approach with platform-specific launcher scripts.
 
 ## Tech Stack
 
@@ -87,7 +89,7 @@ clair/
 1. **Provider Management**: CRUD for API providers (Anthropic-compatible, OpenAI-compatible)
 2. **Profile Management**: Route path + command name + model override per Provider
 3. **Local Proxy**: HTTP proxy on 127.0.0.1:18789 routing to upstream providers
-4. **Wrapper Generation**: Shell scripts in ~/.local/bin/claude-* with env vars
+4. **Wrapper Generation**: Launcher scripts in wrapper dir (Windows: `.cmd`, Linux: bash) + per-profile `.settings.json` files
 5. **Streaming**: SSE response passthrough from providers
 
 ## Development Commands
