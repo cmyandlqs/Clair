@@ -26,43 +26,41 @@
 ```
 src/
 ├── app/
-│   ├── App.tsx              # 根组件
-│   └── routes.tsx           # 路由配置
+│   └── App.tsx              # 根组件（ErrorBoundary + QueryClient）
 ├── components/
 │   ├── layout/
 │   │   ├── MainLayout.tsx   # 三栏主布局
-│   │   ├── TopBar.tsx       # 顶部栏
-│   │   ├── Sidebar.tsx      # 侧边栏
-│   │   └── DetailPanel.tsx  # 详情面板
+│   │   ├── TopBar.tsx       # 顶部栏（代理状态 + 设置按钮）
+│   │   ├── Sidebar.tsx      # 左侧导航
+│   │   └── DetailPanel.tsx  # 右侧 Profile 详情面板
 │   ├── provider/
-│   │   ├── ProviderCard.tsx       # Provider 卡片
-│   │   ├── ProviderList.tsx       # Provider 列表
-│   │   ├── AddProviderModal.tsx   # 添加 Provider 弹窗
-│   │   └── EditProviderModal.tsx   # 编辑 Provider 弹窗
+│   │   ├── ProviderCard.tsx       # Provider 卡片（简介用）
+│   │   ├── ProviderList.tsx       # 中间区域层级列表（Provider Section + Profile 行）
+│   │   ├── AddProviderModal.tsx   # 添加 Provider 弹窗（含配置测试）
+│   │   └── EditProviderModal.tsx  # 编辑 Provider 弹窗（含配置测试）
 │   ├── profile/
-│   │   ├── ProfileList.tsx        # Profile 列表
-│   │   ├── ProfileItem.tsx        # Profile 单项
 │   │   ├── AddProfileModal.tsx    # 添加 Profile 弹窗
 │   │   └── EditProfileModal.tsx   # 编辑 Profile 弹窗
 │   ├── settings/
 │   │   └── SettingsModal.tsx      # 设置弹窗
 │   └── common/
-│       ├── Button.tsx       # 按钮组件
-│       ├── Input.tsx        # 输入框组件
-│       ├── Select.tsx       # 选择框组件
-│       ├── Modal.tsx        # 弹窗基础组件
-│       ├── Toast.tsx        # Toast 提示
-│       └── Badge.tsx        # 状态徽章
+│       ├── Badge.tsx              # 状态徽章
+│       ├── ProviderAvatar.tsx     # Provider 头像图标
+│       ├── Toast.tsx              # Toast 提示
+│       ├── TestResultModal.tsx    # 路由测试结果弹窗
+│       └── ErrorBoundary.tsx      # React 错误边界
 ├── hooks/
 │   ├── useProviders.ts      # Provider 数据 hook
 │   ├── useProfiles.ts       # Profile 数据 hook
 │   ├── useProxyStatus.ts    # 代理状态 hook
-│   ├── useSettings.ts      # 设置 hook
+│   ├── useSettings.ts       # 设置 hook
+│   ├── useUIStore.ts        # Zustand UI 状态（选中 Profile、弹窗开关等）
 │   └── useToast.ts          # Toast hook
 ├── lib/
-│   ├── api.ts               # Tauri 命令封装
-│   ├── types.ts             # 类型定义
-│   └── validators.ts        # Zod 校验模式
+│   ├── api.ts               # Tauri 命令封装（snake_case ↔ camelCase 转换）
+│   ├── types.ts             # TypeScript 类型定义
+│   ├── validators.ts        # Zod 校验模式
+│   └── i18n.tsx             # 国际化
 ├── styles/
 │   └── globals.css          # 全局样式 & CSS 变量
 └── main.tsx                 # 入口文件
@@ -108,7 +106,6 @@ export interface Profile {
   commandName: string
   isDefault: boolean
   wrapperEnabled: boolean
-  wrapperPath?: string
   createdAt: string
   updatedAt: string
 }
@@ -146,12 +143,46 @@ export interface TestProviderResult {
   streamingSupported?: boolean
 }
 
+export interface ProxyEvidenceEntry {
+  id: string
+  timestamp: string
+  requestPath: string
+  routePath?: string
+  profileName?: string
+  providerName?: string
+  providerType?: string
+  requestSource?: string
+  upstreamUrl?: string
+  originalModel?: string
+  rewrittenModel?: string
+  authResult: string
+  outcome: string
+  statusCode?: number
+  latencyMs?: number
+  error?: string
+}
+
+export interface TestProfileResult {
+  ok: boolean
+  latencyMs?: number
+  message: string
+  routePath: string
+  providerName: string
+  expectedModel: string
+  localUrl: string
+  statusCode?: number
+  evidence?: ProxyEvidenceEntry
+}
+
 export interface WrapperStatus {
   exists: boolean
   executable: boolean
   path?: string
   inPath: boolean
   stale: boolean
+  settingsPath?: string
+  settingsExists: boolean
+}
 }
 ```
 
@@ -168,93 +199,41 @@ import { invoke } from '@tauri-apps/api/core'
 
 // ============ Provider Commands ============
 
-export async function listProviders(): Promise<Provider[]> {
-  return invoke('list_providers')
-}
-
-export async function createProvider(input: CreateProviderInput): Promise<Provider> {
-  return invoke('create_provider', { input })
-}
-
-export async function updateProvider(input: UpdateProviderInput): Promise<Provider> {
-  return invoke('update_provider', { input })
-}
-
-export async function deleteProvider(id: string): Promise<{ success: boolean }> {
-  return invoke('delete_provider', { id })
-}
-
-export async function testProvider(id: string): Promise<TestProviderResult> {
-  return invoke('test_provider', { id })
-}
+export async function listProviders(): Promise<Provider[]>
+export async function createProvider(input: CreateProviderInput): Promise<Provider>
+export async function updateProvider(input: UpdateProviderInput): Promise<Provider>
+export async function deleteProvider(id: string): Promise<boolean>
+export async function testProvider(id: string): Promise<TestProviderResult>
+export async function testProviderConfig(input: TestProviderConfigInput): Promise<TestProviderResult>
 
 // ============ Profile Commands ============
 
-export async function listProfiles(): Promise<Profile[]> {
-  return invoke('list_profiles')
-}
-
-export async function createProfile(input: CreateProfileInput): Promise<Profile> {
-  return invoke('create_profile', { input })
-}
-
-export async function updateProfile(input: UpdateProfileInput): Promise<Profile> {
-  return invoke('update_profile', { input })
-}
-
-export async function deleteProfile(id: string): Promise<{ success: boolean }> {
-  return invoke('delete_profile', { id })
-}
-
-export async function setDefaultProfile(id: string): Promise<Profile> {
-  return invoke('set_default_profile', { id })
-}
+export async function listProfiles(): Promise<Profile[]>
+export async function createProfile(input: CreateProfileInput): Promise<Profile>
+export async function updateProfile(input: UpdateProfileInput): Promise<Profile>
+export async function deleteProfile(id: string): Promise<boolean>
+export async function testProfile(profileId: string): Promise<TestProfileResult>
 
 // ============ Proxy Commands ============
 
-export async function getProxyStatus(): Promise<ProxyStatus> {
-  return invoke('get_proxy_status')
-}
-
-export async function startProxy(): Promise<ProxyStatus> {
-  return invoke('start_proxy')
-}
-
-export async function stopProxy(): Promise<ProxyStatus> {
-  return invoke('stop_proxy')
-}
-
-export async function restartProxy(): Promise<ProxyStatus> {
-  return invoke('restart_proxy')
-}
+export async function getProxyStatus(): Promise<ProxyStatus>
+export async function startProxy(): Promise<ProxyStatus>
+export async function stopProxy(): Promise<ProxyStatus>
+export async function reloadProxyConfig(): Promise<ProxyStatus>
+export async function getProxyEvidence(limit?: number): Promise<ProxyEvidenceEntry[]>
 
 // ============ Wrapper Commands ============
 
-export async function detectClaudeBinary(): Promise<ClaudeBinaryDetection> {
-  return invoke('detect_claude_binary')
-}
-
-export async function generateWrapper(profileId: string): Promise<GenerateWrapperResult> {
-  return invoke('generate_wrapper', { profileId })
-}
-
-export async function generateAllWrappers(): Promise<GenerateWrapperResult[]> {
-  return invoke('generate_all_wrappers')
-}
-
-export async function checkWrapperStatus(profileId: string): Promise<WrapperStatus> {
-  return invoke('check_wrapper_status', { profileId })
-}
+export async function detectClaudeBinary(): Promise<ClaudeBinaryDetection>
+export async function verifyClaudeBinary(path?: string): Promise<ClaudeBinaryVerification>
+export async function generateWrapper(profileId: string): Promise<GenerateWrapperResult>
+export async function checkWrapperStatus(profileId: string): Promise<WrapperStatus>
+export async function getWrapperPathDiagnostics(): Promise<WrapperPathDiagnostics>
 
 // ============ Settings Commands ============
 
-export async function getSettings(): Promise<AppSettings> {
-  return invoke('get_settings')
-}
-
-export async function updateSettings(input: Partial<AppSettings>): Promise<AppSettings> {
-  return invoke('update_settings', { input })
-}
+export async function getSettings(): Promise<AppSettings>
+export async function updateSettings(input: Partial<AppSettings>): Promise<AppSettings>
 
 // ============ Types for API ============
 
@@ -272,6 +251,7 @@ export type CreateProviderInput = {
 export type UpdateProviderInput = {
   id: string
   name?: string
+  type?: ProviderType
   baseUrl?: string
   apiKey?: string
   authScheme?: AuthScheme
@@ -302,16 +282,42 @@ export type UpdateProfileInput = {
   wrapperEnabled?: boolean
 }
 
-export type ClaudeBinaryDetection = {
+export type TestProviderConfigInput = {
+  providerType: ProviderType
+  baseUrl: string
+  apiKey: string
+  authScheme: AuthScheme
+  defaultModel: string
+}
+
+export interface ClaudeBinaryDetection {
   found: boolean
   path?: string
   candidates: string[]
 }
 
+export interface ClaudeBinaryVerification {
+  configuredPath?: string
+  resolvedPath?: string
+  source: string
+  runnable: boolean
+  version?: string
+  message: string
+}
+
 export type GenerateWrapperResult = {
   success: boolean
   path: string
+  settingsPath?: string
   commandName: string
+}
+
+export type WrapperPathDiagnostics = {
+  configuredDir: string
+  resolvedDir: string
+  inPath: boolean
+  matchingEntries: string[]
+  pathEntries: string[]
 }
 ```
 

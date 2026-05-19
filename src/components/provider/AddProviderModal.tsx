@@ -22,6 +22,7 @@ const PROVIDER_TYPES = [
 export function AddProviderModal({ onClose }: AddProviderModalProps) {
   const [step, setStep] = useState(1)
   const [testResult, setTestResult] = useState<string | null>(null)
+  const [testSucceeded, setTestSucceeded] = useState<boolean | null>(null)
   const [isTesting, setIsTesting] = useState(false)
   const { t } = useI18n()
 
@@ -67,6 +68,7 @@ export function AddProviderModal({ onClose }: AddProviderModalProps) {
 
     setIsTesting(true)
     setTestResult(null)
+    setTestSucceeded(null)
 
     try {
       const data = getValues()
@@ -78,6 +80,7 @@ export function AddProviderModal({ onClose }: AddProviderModalProps) {
         defaultModel: data.defaultModel,
       })
 
+      setTestSucceeded(result.ok)
       setTestResult(
         result.ok
           ? t('provider.connected', { latency: String(result.latencyMs ?? '?'), model: result.model ?? '' })
@@ -90,6 +93,7 @@ export function AddProviderModal({ onClose }: AddProviderModalProps) {
         addToast('error', `${t('provider.connectionFailed')}: ${result.message}`)
       }
     } catch {
+      setTestSucceeded(false)
       setTestResult(t('error.connectionFailed'))
       addToast('error', t('error.connectionFailed'))
     } finally {
@@ -212,7 +216,7 @@ export function AddProviderModal({ onClose }: AddProviderModalProps) {
                 {testResult && (
                   <div
                     className={`p-3 rounded-lg text-sm ${
-                      testResult.startsWith(t('provider.connected').substring(0, 5))
+                      testSucceeded
                         ? 'bg-[var(--success)]/10 text-[var(--success)]'
                         : 'bg-[var(--error)]/10 text-[var(--error)]'
                     }`}

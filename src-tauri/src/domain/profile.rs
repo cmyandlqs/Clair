@@ -10,7 +10,6 @@ pub struct Profile {
     pub command_name: String,
     pub is_default: bool,
     pub wrapper_enabled: bool,
-    pub wrapper_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

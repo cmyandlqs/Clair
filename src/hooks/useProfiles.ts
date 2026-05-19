@@ -4,7 +4,6 @@ import {
   createProfile,
   updateProfile,
   deleteProfile,
-  setDefaultProfile,
   generateWrapper,
   checkWrapperStatus,
   testProfile,
@@ -49,18 +48,6 @@ export function useDeleteProfile() {
 
   return useMutation({
     mutationFn: (id: string) => deleteProfile(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['profiles'] })
-      reloadProxyConfig().catch(() => {})
-    },
-  })
-}
-
-export function useSetDefaultProfile() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (id: string) => setDefaultProfile(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profiles'] })
       reloadProxyConfig().catch(() => {})

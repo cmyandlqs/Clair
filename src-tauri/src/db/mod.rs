@@ -145,7 +145,7 @@ impl Database {
         let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, name, route_path, provider_id, model, command_name,
-                    is_default, wrapper_enabled, wrapper_path, created_at, updated_at
+                    is_default, wrapper_enabled, created_at, updated_at
              FROM profiles ORDER BY is_default DESC, name",
         )?;
 
@@ -160,9 +160,8 @@ impl Database {
                     command_name: row.get(5)?,
                     is_default: row.get::<_, i32>(6)? == 1,
                     wrapper_enabled: row.get::<_, i32>(7)? == 1,
-                    wrapper_path: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -174,8 +173,8 @@ impl Database {
         let conn = self.connection();
         conn.execute(
             "INSERT INTO profiles (id, name, route_path, provider_id, model, command_name,
-             is_default, wrapper_enabled, wrapper_path, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             is_default, wrapper_enabled, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 profile.id,
                 profile.name,
@@ -185,7 +184,6 @@ impl Database {
                 profile.command_name,
                 profile.is_default as i32,
                 profile.wrapper_enabled as i32,
-                profile.wrapper_path,
                 profile.created_at,
                 profile.updated_at,
             ],
@@ -197,7 +195,7 @@ impl Database {
         let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, name, route_path, provider_id, model, command_name,
-                    is_default, wrapper_enabled, wrapper_path, created_at, updated_at
+                    is_default, wrapper_enabled, created_at, updated_at
              FROM profiles WHERE route_path = ?1",
         )?;
 
@@ -212,9 +210,8 @@ impl Database {
                 command_name: row.get(5)?,
                 is_default: row.get::<_, i32>(6)? == 1,
                 wrapper_enabled: row.get::<_, i32>(7)? == 1,
-                wrapper_path: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             }))
         } else {
             Ok(None)
@@ -225,7 +222,7 @@ impl Database {
         let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, name, route_path, provider_id, model, command_name,
-                    is_default, wrapper_enabled, wrapper_path, created_at, updated_at
+                    is_default, wrapper_enabled, created_at, updated_at
              FROM profiles WHERE id = ?1",
         )?;
 
@@ -240,9 +237,8 @@ impl Database {
                 command_name: row.get(5)?,
                 is_default: row.get::<_, i32>(6)? == 1,
                 wrapper_enabled: row.get::<_, i32>(7)? == 1,
-                wrapper_path: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             }))
         } else {
             Ok(None)
@@ -254,8 +250,8 @@ impl Database {
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "UPDATE profiles SET name = ?1, route_path = ?2, provider_id = ?3, model = ?4,
-             command_name = ?5, is_default = ?6, wrapper_enabled = ?7, wrapper_path = ?8,
-             updated_at = ?9 WHERE id = ?10",
+             command_name = ?5, is_default = ?6, wrapper_enabled = ?7,
+             updated_at = ?8 WHERE id = ?9",
             params![
                 profile.name,
                 profile.route_path,
@@ -264,7 +260,6 @@ impl Database {
                 profile.command_name,
                 profile.is_default as i32,
                 profile.wrapper_enabled as i32,
-                profile.wrapper_path,
                 now,
                 profile.id,
             ],

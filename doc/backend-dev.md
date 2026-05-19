@@ -15,7 +15,6 @@
 | Tokio | 1.x | 异步运行时 |
 | Axum | 0.7.x | HTTP 框架 |
 | Reqwest | 0.12.x | HTTP 客户端 |
-| SQLx | 0.8.x | 数据库 |
 | rusqlite | 0.32.x | SQLite 驱动 |
 | Serde | 1.x | 序列化 |
 | UUID | 1.x | ID 生成 |
@@ -29,44 +28,36 @@ src-tauri/
 ├── tauri.conf.json
 ├── src/
 │   ├── main.rs                 # 入口
-│   ├── lib.rs                  # 库入口
-│   ├── commands/               # Tauri 命令
+│   ├── lib.rs                  # 库入口，注册所有 Tauri 命令
+│   ├── commands/               # Tauri 命令处理器
 │   │   ├── mod.rs
-│   │   ├── provider.rs         # Provider CRUD
-│   │   ├── profile.rs         # Profile CRUD
-│   │   ├── proxy.rs           # 代理控制
-│   │   ├── wrapper.rs         # Wrapper 管理
-│   │   └── settings.rs        # 设置管理
+│   │   ├── provider.rs         # Provider CRUD + 测试
+│   │   ├── profile.rs         # Profile CRUD + 路由测试
+│   │   ├── proxy.rs           # 代理启动/停止/重载 + lock_safe 工具函数
+│   │   ├── wrapper.rs         # Wrapper 生成/状态检查/路径诊断
+│   │   └── settings.rs        # 设置读写 + 校验（host/port/token）
 │   ├── domain/                 # 领域模型
 │   │   ├── mod.rs
-│   │   ├── provider.rs
-│   │   ├── profile.rs
-│   │   └── settings.rs
-│   ├── db/                     # 数据库
-│   │   ├── mod.rs
-│   │   ├── migrations.rs       # 迁移脚本
-│   │   └── connection.rs       # 连接管理
+│   │   ├── provider.rs        # Provider struct + ProviderType/AuthScheme/ProviderStatus 枚举
+│   │   ├── profile.rs         # Profile struct
+│   │   └── settings.rs        # AppSettings struct + 默认值生成
+│   ├── db/                     # SQLite 操作
+│   │   ├── mod.rs             # CRUD 方法（connection helper 通过 lock_safe 恢复 poison）
+│   │   ├── migrations.rs      # CREATE TABLE IF NOT EXISTS 迁移
+│   │   └── connection.rs      # Database 封装 Mutex<Connection>
 │   ├── proxy/                  # 本地代理服务
-│   │   ├── mod.rs
-│   │   ├── server.rs          # Axum 服务器
-│   │   ├── router.rs          # 路由解析
-│   │   ├── forward.rs         # 请求转发
-│   │   └── adapters/          # 协议适配器
-│   │       ├── mod.rs
-│   │       ├── anthropic.rs   # Anthropic 适配器
-│   │       └── openai.rs      # OpenAI 适配器
+│   │   ├── mod.rs             # 导出 ProxyServer
+│   │   └── server.rs          # Axum 服务器：路由、认证、转发、模型改写、SSE 流式、证据记录
 │   ├── services/               # 业务服务
 │   │   ├── mod.rs
-│   │   ├── provider_service.rs
-│   │   ├── profile_service.rs
-│   │   ├── wrapper_service.rs
-│   │   └── claude_detect_service.rs
-│   ├── security/               # 安全相关
-│   │   └── secret.rs
-│   └── utils/                  # 工具
+│   │   ├── provider_service.rs # Provider 连接测试逻辑
+│   │   ├── settings_service.rs # 设置加载 + 缺省值持久化
+│   │   ├── wrapper_service.rs  # Wrapper 生成（shell 转义 + 原子写入）+ 状态检查
+│   │   └── claude_detect_service.rs # Claude 二进制探测 + 版本验证
+│   └── security/               # 安全相关
 │       ├── mod.rs
-│       ├── paths.rs
-│       └── validation.rs
+│       ├── secret.rs          # API key 脱敏
+│       └── validation.rs      # 路由路径/命令名/URL 校验
 ```
 
 ---
@@ -785,7 +776,6 @@ pub async fn test_provider(
 
 use crate::db::Database;
 use crate::domain::Profile;
-use crate::services::profile_service::ProfileService;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -1572,135 +1562,23 @@ impl ProviderService {
 }
 ```
 
-### 7.2 Profile Service
+### 7.2 Wrapper Service
 
-```rust
-// src-tauri/src/services/profile_service.rs
+Wrapper 生成逻辑位于 `src-tauri/src/services/wrapper_service.rs`，核心功能：
 
-use crate::domain::Profile;
-use crate::services::wrapper_service::WrapperService;
-use std::path::PathBuf;
+- **`generate(profile, settings)`** — 生成 wrapper 脚本 + `.settings.json` 文件，使用 `--settings` 方案（而非环境变量 `export`）
+- **`check_status(profile, settings)`** — 检查 wrapper 脚本和 settings 文件的存在性、可执行性、新鲜度
+- **`diagnose_wrapper_path(settings)`** — 诊断 wrapper 目录配置、PATH 可达性
+- Shell 转义使用 `escape_shell_double_quote()` / `escape_batch_value()` 防注入
+- 文件写入使用原子模式：write → `.tmp` → rename
+- Linux 生成 bash wrapper，Windows 生成 `.cmd` wrapper
+- `build_profile_settings_content()` 跨平台通用（无 `#[cfg]` 条件编译）
 
-pub struct ProfileService;
+> 注：不存在 `profile_service.rs`，Profile 相关业务逻辑直接在 `commands/profile.rs` 命令层处理。
 
-impl ProfileService {
-    pub fn generate_wrapper(profile: &Profile) -> Result<String, String> {
-        WrapperService::generate(profile)
-    }
-}
-```
+### 7.3 Wrapper Service 代码
 
-### 7.3 Wrapper Service
-
-```rust
-// src-tauri/src/services/wrapper_service.rs
-
-use crate::domain::Profile;
-use crate::services::claude_detect_service::ClaudeDetectService;
-use std::fs;
-use std::path::PathBuf;
-
-pub struct WrapperService;
-
-impl WrapperService {
-    pub fn generate(profile: &Profile) -> Result<String, String> {
-        let wrapper_dir = dirs::home_dir()
-            .map(|p| p.join(".local/bin"))
-            .ok_or_else(|| "Cannot determine home directory".to_string())?;
-
-        // Ensure wrapper directory exists
-        fs::create_dir_all(&wrapper_dir).map_err(|e| e.to_string())?;
-
-        let wrapper_path = wrapper_dir.join(&profile.command_name);
-
-        // Detect Claude binary path
-        let claude_binary = ClaudeDetectService::detect()
-            .map_err(|e| e.to_string())?;
-
-        let claude_path = claude_binary.path
-            .unwrap_or_else(|| "/usr/local/bin/claude".to_string());
-
-        // Generate wrapper script
-        let wrapper_content = format!(
-            r#"#!/usr/bin/env bash
-set -e
-
-CLAIR_BASE_URL="http://127.0.0.1:18789{}"
-CLAIR_TOKEN=" Clair local token placeholder "
-CLAUDE_BIN="{}"
-
-export ANTHROPIC_BASE_URL="$CLAIR_BASE_URL"
-export ANTHROPIC_AUTH_TOKEN="$CLAIR_TOKEN"
-
-exec "$CLAUDE_BIN" "$@"
-"#,
-            profile.route_path,
-            claude_path
-        );
-
-        fs::write(&wrapper_path, &wrapper_content).map_err(|e| e.to_string())?;
-
-        // Make executable
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&wrapper_path)
-                .map_err(|e| e.to_string())?
-                .permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&wrapper_path, perms).map_err(|e| e.to_string())?;
-        }
-
-        Ok(wrapper_path.to_string_lossy().to_string())
-    }
-
-    pub fn check_status(profile: &Profile) -> Result<WrapperStatus, String> {
-        let wrapper_dir = dirs::home_dir()
-            .map(|p| p.join(".local/bin"))
-            .unwrap_or_default();
-
-        let wrapper_path = wrapper_dir.join(&profile.command_name);
-
-        let exists = wrapper_path.exists();
-        let executable = if exists {
-            wrapper_path.metadata()
-                .map(|m| {
-                    #[cfg(unix)]
-                    { m.permissions().mode() & 0o111 != 0 }
-                    #[cfg(not(unix))]
-                    { true }
-                })
-                .unwrap_or(false)
-        } else {
-            false
-        };
-
-        // Check if in PATH
-        let in_path = std::process::Command::new("which")
-            .arg(&profile.command_name)
-            .output()
-            .map(|o| o.status().success())
-            .unwrap_or(false);
-
-        Ok(WrapperStatus {
-            exists,
-            executable,
-            path: Some(wrapper_path.to_string_lossy().to_string()),
-            in_path,
-            stale: false, // TODO: Implement stale detection
-        })
-    }
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct WrapperStatus {
-    pub exists: bool,
-    pub executable: bool,
-    pub path: Option<String>,
-    pub in_path: bool,
-    pub stale: bool,
-}
-```
+详见 `src-tauri/src/services/wrapper_service.rs`，当前实现要点已在上方描述。
 
 ### 7.4 Claude Detect Service
 
@@ -1784,7 +1662,7 @@ mod db;
 mod domain;
 mod proxy;
 mod services;
-mod utils;
+mod security;
 
 use db::Database;
 use std::path::PathBuf;
@@ -1805,8 +1683,6 @@ pub fn run() {
     std::fs::create_dir_all(&config_dir).expect("Failed to create config directory");
 
     let db_path = config_dir.join("clair.db");
-    let log_dir = config_dir.join("logs");
-    std::fs::create_dir_all(&log_dir).expect("Failed to create log directory");
 
     // Initialize database
     let db = Database::new(db_path).expect("Failed to initialize database");
@@ -1826,22 +1702,25 @@ pub fn run() {
             commands::provider::update_provider,
             commands::provider::delete_provider,
             commands::provider::test_provider,
+            commands::provider::test_provider_config,
             // Profile commands
             commands::profile::list_profiles,
             commands::profile::create_profile,
             commands::profile::update_profile,
             commands::profile::delete_profile,
-            commands::profile::set_default_profile,
+            commands::profile::test_profile,
             // Proxy commands
             commands::proxy::get_proxy_status,
             commands::proxy::start_proxy,
             commands::proxy::stop_proxy,
-            commands::proxy::restart_proxy,
+            commands::proxy::reload_proxy_config,
+            commands::proxy::get_proxy_evidence,
             // Wrapper commands
             commands::wrapper::detect_claude_binary,
+            commands::wrapper::verify_claude_binary,
             commands::wrapper::generate_wrapper,
-            commands::wrapper::generate_all_wrappers,
             commands::wrapper::check_wrapper_status,
+            commands::wrapper::get_wrapper_path_diagnostics,
             // Settings commands
             commands::settings::get_settings,
             commands::settings::update_settings,
@@ -1863,31 +1742,17 @@ pub fn run() {
 
 ### 9.2 错误处理
 
-```rust
-// 使用 thiserror 定义错误类型
-use thiserror::Error;
-
-#[derive(Error, Debug)]
-pub enum AppError {
-    #[error("Database error: {0}")]
-    Database(#[from] rusqlite::Error),
-
-    #[error("Provider not found: {0}")]
-    ProviderNotFound(String),
-
-    #[error("Profile not found: {0}")]
-    ProfileNotFound(String),
-
-    #[error("Network error: {0}")]
-    Network(#[from] reqwest::Error),
-}
-```
+- 命令层统一使用 `Result<_, String>` 模式
+- 非致命错误使用 `tracing::warn!` 记录，不中断流程（如代理 reload 失败）
+- Mutex 恢复使用 `lock_safe()` helper（`unwrap_or_else(|e| e.into_inner())`），而非 `.lock().unwrap()`
+- Provider 删除时若有关联 Profile 则拒绝（返回错误信息）
 
 ### 9.3 日志脱敏
 
 ```rust
-// 脱敏 API key
-fn mask_api_key(key: &str) -> String {
+// src-tauri/src/security/secret.rs
+// 脱敏 API key: "sk-abc...xyz" → "sk-****xyz"
+pub fn mask_api_key(key: &str) -> String {
     if key.len() <= 8 {
         "****".to_string()
     } else {
@@ -1896,7 +1761,12 @@ fn mask_api_key(key: &str) -> String {
 }
 ```
 
-### 9.4 测试
+### 9.4 文件写入安全
+
+- Wrapper 和 Settings 文件使用原子写入：write → `.tmp` → rename
+- Shell 转义：`escape_shell_double_quote()` / `escape_batch_value()` 防注入
+
+### 9.5 测试
 
 MVP 阶段重点测试：
 1. Provider CRUD
@@ -1913,20 +1783,23 @@ MVP 阶段重点测试：
 | `list_providers` | - | `Provider[]` |
 | `create_provider` | `CreateProviderInput` | `Provider` |
 | `update_provider` | `UpdateProviderInput` | `Provider` |
-| `delete_provider` | `{id: string}` | `{success: bool}` |
+| `delete_provider` | `{id: string}` | `boolean` |
 | `test_provider` | `{id: string}` | `TestProviderResult` |
+| `test_provider_config` | `TestProviderConfigInput` | `TestProviderResult` |
 | `list_profiles` | - | `Profile[]` |
 | `create_profile` | `CreateProfileInput` | `Profile` |
 | `update_profile` | `UpdateProfileInput` | `Profile` |
-| `delete_profile` | `{id: string}` | `{success: bool}` |
-| `set_default_profile` | `{id: string}` | `Profile` |
+| `delete_profile` | `{id: string}` | `boolean` |
+| `test_profile` | `{profileId: string}` | `TestProfileResult` |
 | `get_proxy_status` | - | `ProxyStatus` |
 | `start_proxy` | - | `ProxyStatus` |
 | `stop_proxy` | - | `ProxyStatus` |
-| `restart_proxy` | - | `ProxyStatus` |
+| `reload_proxy_config` | - | `ProxyStatus` |
+| `get_proxy_evidence` | `{limit?: number}` | `ProxyEvidenceEntry[]` |
 | `detect_claude_binary` | - | `ClaudeBinaryDetection` |
+| `verify_claude_binary` | `{path?: string}` | `ClaudeBinaryVerification` |
 | `generate_wrapper` | `{profileId: string}` | `GenerateWrapperResult` |
-| `generate_all_wrappers` | - | `GenerateWrapperResult[]` |
 | `check_wrapper_status` | `{profileId: string}` | `WrapperStatus` |
+| `get_wrapper_path_diagnostics` | - | `WrapperPathDiagnostics` |
 | `get_settings` | - | `AppSettings` |
 | `update_settings` | `Partial<AppSettings>` | `AppSettings` |

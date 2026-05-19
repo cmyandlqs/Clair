@@ -1,6 +1,6 @@
 use rusqlite::{Connection, Result};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 pub struct Database {
     conn: Mutex<Connection>,
@@ -13,7 +13,7 @@ impl Database {
         Ok(Self { conn: Mutex::new(conn) })
     }
 
-    pub fn connection(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap()
+    pub fn connection(&self) -> MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 }

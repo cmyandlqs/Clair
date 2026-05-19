@@ -1,10 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getProxyStatus,
-  getProxyEvidence,
+    getProxyEvidence,
   startProxy,
   stopProxy,
-  restartProxy,
 } from '@/lib/api'
 
 export function useProxyStatus() {
@@ -39,17 +38,6 @@ export function useStopProxy() {
 
   return useMutation({
     mutationFn: () => stopProxy(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['proxyStatus'] })
-    },
-  })
-}
-
-export function useRestartProxy() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: () => restartProxy(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['proxyStatus'] })
     },

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MainLayout } from '@/components/layout/MainLayout'
+import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { I18nProvider } from '@/lib/i18n'
 
 const queryClient = new QueryClient({
@@ -13,10 +14,12 @@ const queryClient = new QueryClient({
 
 export function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <MainLayout />
-      </I18nProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider>
+          <MainLayout />
+        </I18nProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   )
 }

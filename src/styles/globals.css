@@ -3,48 +3,33 @@
 @tailwind utilities;
 
 :root {
-  /* ========== 背景层 ========== */
   --background: #F9F9F9;
   --background-subtle: #F3F3F3;
-  --canvas: #FDFBFA;
 
-  /* ========== 表面层 ========== */
   --surface: #FFFFFF;
-  --surface-elevated: #FFFFFF;
   --surface-muted: #F5F5F5;
 
-  /* ========== 主色调 (Orange/Coral) ========== */
   --primary: #E67E50;
   --primary-hover: #D66A3A;
   --primary-active: #C85A2A;
   --primary-soft: #FFF0E8;
-  --primary-border: #FFCDB8;
 
-  /* ========== 语义色 ========== */
   --success: #52C41A;
   --success-soft: #F6FFED;
   --warning: #FAAD14;
   --warning-soft: #FFFBE6;
   --error: #FF4D4F;
   --error-soft: #FFF1F0;
-  --info: #1890FF;
 
-  /* ========== 文字层 ========== */
   --text-primary: #1A1A1A;
   --text-secondary: #666666;
   --text-muted: #999999;
-  --text-hint: #A0A0A0;
 
-  /* ========== 边框层 ========== */
   --border: #EDEDED;
   --border-strong: #E0E0E0;
-  --border-active: #E67E50;
 
-  /* ========== 阴影 ========== */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.08);
-  --shadow-inner: inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 html, body {
@@ -179,12 +164,6 @@ html, body {
     color: var(--error);
   }
 
-  .badge-primary {
-    background: var(--primary-soft);
-    color: var(--primary);
-  }
-
-  /* ========== 侧边栏项 ========== */
   .sidebar-item {
     display: flex;
     align-items: center;
@@ -205,11 +184,5 @@ html, body {
   .sidebar-item.active {
     background: var(--primary-soft);
     color: var(--primary);
-  }
-
-  .sidebar-item .icon {
-    width: 18px;
-    height: 18px;
-    stroke-width: 1.5;
   }
 }

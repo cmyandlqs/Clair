@@ -52,12 +52,17 @@ impl WrapperService {
 
         if let Some(settings_path) = &artifacts.settings_path {
             if let Some(settings_content) = &artifacts.settings_content {
-                fs::write(settings_path, settings_content).map_err(|e| e.to_string())?;
+                let tmp = settings_path.with_extension("tmp");
+                fs::write(&tmp, settings_content).map_err(|e| e.to_string())?;
+                fs::rename(&tmp, settings_path).map_err(|e| e.to_string())?;
             }
         }
 
-        fs::write(&artifacts.launcher_path, &artifacts.launcher_content)
-            .map_err(|e| e.to_string())?;
+        {
+            let tmp = artifacts.launcher_path.with_extension("tmp");
+            fs::write(&tmp, &artifacts.launcher_content).map_err(|e| e.to_string())?;
+            fs::rename(&tmp, &artifacts.launcher_path).map_err(|e| e.to_string())?;
+        }
 
         #[cfg(unix)]
         {
@@ -210,9 +215,17 @@ fn settings_artifact_differs(path: Option<&Path>, expected_content: Option<&str>
     }
 }
 
+fn escape_shell_double_quote(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', "\\$")
+        .replace('`', "\\`")
+}
+
 #[cfg(not(windows))]
 fn build_unix_wrapper_content(claude_path: &str, settings_path: &Path) -> String {
-    let settings_path = settings_path.to_string_lossy();
+    let settings_path = escape_shell_double_quote(&settings_path.to_string_lossy());
+    let claude_path = escape_shell_double_quote(claude_path);
     format!(
         r#"#!/usr/bin/env bash
 set -e
@@ -261,8 +274,15 @@ fn build_profile_settings_content(
 }
 
 #[cfg(windows)]
+fn escape_batch_value(s: &str) -> String {
+    s.replace('"', "")
+        .replace('%', "%%")
+}
+
+#[cfg(windows)]
 fn build_windows_wrapper_content(claude_path: &str, settings_path: &Path) -> String {
-    let settings_path = settings_path.to_string_lossy();
+    let settings_path = escape_batch_value(&settings_path.to_string_lossy());
+    let claude_path = escape_batch_value(claude_path);
     format!(
         r#"@echo off
 setlocal
