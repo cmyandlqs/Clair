@@ -42,11 +42,14 @@ impl Default for ProxyState {
     }
 }
 
+pub fn lock_safe<T>(lock: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    lock.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[tauri::command]
 pub async fn get_proxy_status(state: tauri::State<'_, ProxyState>) -> Result<ProxyStatus, String> {
-    // Clone Arc out of mutex before awaiting
     let server_arc = {
-        let guard = state.server.lock().unwrap();
+        let guard = lock_safe(&state.server);
         guard.clone()
     };
 
@@ -74,10 +77,10 @@ pub async fn start_proxy(
     state: tauri::State<'_, ProxyState>,
     db: tauri::State<'_, Database>,
 ) -> Result<ProxyStatus, String> {
-    // Stop existing server first
     stop_server(&state);
 
-    // Load config from database
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
     let profiles = db.list_profiles().map_err(|e| e.to_string())?;
     let providers = db.list_providers().map_err(|e| e.to_string())?;
     let settings = load_settings(&db);
@@ -111,13 +114,13 @@ pub async fn start_proxy(
 
     // Update state (no await, so mutex is fine)
     {
-        *state.server.lock().unwrap() = Some(server_arc);
+        *lock_safe(&state.server) = Some(server_arc);
     }
     {
-        *state.shutdown_tx.lock().unwrap() = Some(tx);
+        *lock_safe(&state.shutdown_tx) = Some(tx);
     }
     {
-        *state.evidence.lock().unwrap() = evidence_store;
+        *lock_safe(&state.evidence) = evidence_store;
     }
 
     tracing::info!(host = %host, port = %port, "Proxy server started");
@@ -143,7 +146,7 @@ pub async fn reload_proxy_config(
     db: tauri::State<'_, Database>,
 ) -> Result<ProxyStatus, String> {
     let server_arc = {
-        let guard = state.server.lock().unwrap();
+        let guard = lock_safe(&state.server);
         guard.clone()
     };
 
@@ -172,7 +175,7 @@ pub async fn get_proxy_evidence(
     limit: Option<usize>,
 ) -> Result<Vec<ProxyEvidenceEntry>, String> {
     let evidence = {
-        let guard = state.evidence.lock().unwrap();
+        let guard = lock_safe(&state.evidence);
         guard.clone()
     };
 
@@ -180,12 +183,10 @@ pub async fn get_proxy_evidence(
 }
 
 fn stop_server(state: &tauri::State<'_, ProxyState>) {
-    // Send shutdown signal
-    if let Some(tx) = state.shutdown_tx.lock().unwrap().take() {
+    if let Some(tx) = lock_safe(&state.shutdown_tx).take() {
         let _ = tx.send(());
     }
-    // Clear server reference
-    state.server.lock().unwrap().take();
+    lock_safe(&state.server).take();
 }
 
 fn load_settings(db: &Database) -> AppSettings {
@@ -198,7 +199,7 @@ pub async fn reload_proxy_config_if_running(
     db: &Database,
 ) -> Result<(), String> {
     let server_arc = {
-        let guard = state.server.lock().unwrap();
+        let guard = lock_safe(&state.server);
         guard.clone()
     };
 

@@ -112,6 +112,7 @@ impl ProxyServer {
     ) -> Response {
         let method = request.method().clone();
         let path = request.uri().path().to_string();
+        let query = request.uri().query().map(|q| format!("?{}", q)).unwrap_or_default();
         let path_trimmed = path.trim_start_matches('/');
         let request_source = request
             .headers()
@@ -172,21 +173,19 @@ impl ProxyServer {
                     );
                 }
                 None => {
-                    warn!(path = %path, "Auth failed: missing auth token");
+                    info!(path = %path, "Request without auth token (likely Claude Code probe)");
                     record_evidence(
                         &state.evidence,
-                        ProxyEvidenceEntry::rejected(
+                        ProxyEvidenceEntry::probe(
                             path.clone(),
                             Some(route.clone()),
                             request_source.clone(),
-                            "missing_auth",
-                            "Missing auth token".to_string(),
                         ),
                     );
                     return json_error_response(
                         StatusCode::UNAUTHORIZED,
-                        "unauthorized",
-                        "Missing auth token",
+                        "authentication_error",
+                        "Invalid API Key",
                     );
                 }
             }
@@ -254,6 +253,7 @@ impl ProxyServer {
         let request_id = Uuid::new_v4().to_string();
         let start = std::time::Instant::now();
         let upstream_url = build_upstream_url(&provider.base_url, &remaining_path);
+        let upstream_url = if query.is_empty() { upstream_url } else { format!("{}{}", upstream_url, query) };
 
         info!(
             request_id = %request_id,
@@ -531,6 +531,31 @@ impl ProxyEvidenceEntry {
             error: Some(error),
         }
     }
+
+    fn probe(
+        request_path: String,
+        route_path: Option<String>,
+        request_source: Option<String>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            timestamp: Utc::now().to_rfc3339(),
+            request_path,
+            route_path,
+            profile_name: None,
+            provider_name: None,
+            provider_type: None,
+            request_source,
+            upstream_url: None,
+            original_model: None,
+            rewritten_model: None,
+            auth_result: "no_auth".to_string(),
+            outcome: "probe".to_string(),
+            status_code: Some(401),
+            latency_ms: None,
+            error: None,
+        }
+    }
 }
 
 struct ForwardResponse {
@@ -541,7 +566,7 @@ struct ForwardResponse {
 }
 
 pub fn recent_evidence(evidence: &EvidenceStore, limit: usize) -> Vec<ProxyEvidenceEntry> {
-    let guard = evidence.lock().unwrap();
+    let guard = evidence.lock().unwrap_or_else(|e| e.into_inner());
     let take = limit.min(guard.len());
     guard
         .iter()
@@ -555,7 +580,7 @@ pub fn recent_evidence(evidence: &EvidenceStore, limit: usize) -> Vec<ProxyEvide
 }
 
 fn record_evidence(evidence: &EvidenceStore, entry: ProxyEvidenceEntry) {
-    let mut guard = evidence.lock().unwrap();
+    let mut guard = evidence.lock().unwrap_or_else(|e| e.into_inner());
     if guard.len() >= MAX_EVIDENCE_ENTRIES {
         guard.pop_front();
     }
@@ -752,7 +777,6 @@ mod integration_tests {
             command_name: "claude-test".into(),
             is_default: false,
             wrapper_enabled: false,
-            wrapper_path: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-01T00:00:00Z".into(),
         };

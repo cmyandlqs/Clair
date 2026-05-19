@@ -29,7 +29,6 @@ export interface Profile {
   commandName: string
   isDefault: boolean
   wrapperEnabled: boolean
-  wrapperPath?: string
   createdAt: string
   updatedAt: string
 }

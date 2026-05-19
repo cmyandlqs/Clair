@@ -46,6 +46,6 @@ fn default_wrapper_dir() -> String {
 fn generate_local_token() -> String {
     format!(
         "clair-{}",
-        uuid::Uuid::new_v4().to_string().split('-').next().unwrap()
+        uuid::Uuid::new_v4().to_string().replace('-', "")
     )
 }

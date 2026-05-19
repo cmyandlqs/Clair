@@ -1,3 +1,4 @@
+use crate::commands::proxy::ProxyState;
 use crate::db::Database;
 use crate::domain::AppSettings;
 use crate::services::SettingsService;
@@ -12,19 +13,33 @@ pub async fn get_settings(db: State<'_, Database>) -> Result<AppSettings, String
 #[tauri::command]
 pub async fn update_settings(
     db: State<'_, Database>,
+    proxy_state: State<'_, ProxyState>,
     input: PartialAppSettings,
 ) -> Result<AppSettings, String> {
     let mut settings = SettingsService::load_settings(&db)?;
 
-    // Apply updates
-    if let Some(v) = input.proxy_host {
-        settings.proxy_host = v;
+    if let Some(ref v) = input.proxy_host {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            return Err("proxy_host cannot be empty".to_string());
+        }
+        if trimmed != "127.0.0.1" && trimmed != "localhost" && trimmed != "::1" {
+            return Err("proxy_host must be 127.0.0.1, localhost, or ::1 for security".to_string());
+        }
+        settings.proxy_host = trimmed.to_string();
     }
     if let Some(v) = input.proxy_port {
+        if v < 1024 {
+            return Err("proxy_port must be >= 1024 (privileged ports not allowed)".to_string());
+        }
         settings.proxy_port = v;
     }
-    if let Some(v) = input.proxy_auth_token {
-        settings.proxy_auth_token = v;
+    if let Some(ref v) = input.proxy_auth_token {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            return Err("proxy_auth_token cannot be empty".to_string());
+        }
+        settings.proxy_auth_token = trimmed.to_string();
     }
     if let Some(v) = input.start_proxy_on_launch {
         settings.start_proxy_on_launch = v;
@@ -75,6 +90,21 @@ pub async fn update_settings(
     }
     db.set_setting("theme", &settings.theme)
         .map_err(|e| e.to_string())?;
+
+    let needs_restart = input.proxy_host.is_some()
+        || input.proxy_port.is_some()
+        || input.proxy_auth_token.is_some();
+
+    if needs_restart {
+        let server_arc = {
+            let guard = crate::commands::proxy::lock_safe(&proxy_state.server);
+            guard.clone()
+        };
+        if server_arc.is_some() {
+            super::proxy::restart_proxy(proxy_state, db).await?;
+            return Ok(settings);
+        }
+    }
 
     Ok(settings)
 }

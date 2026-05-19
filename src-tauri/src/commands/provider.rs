@@ -62,7 +62,9 @@ pub async fn create_provider(
 
     db.create_provider(&provider).map_err(|e| e.to_string())?;
 
-    let _ = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await;
+    if let Err(e) = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await {
+        tracing::warn!("Failed to reload proxy config after provider create: {}", e);
+    }
 
     tracing::info!(id = %provider.id, "Provider created");
     Ok(provider)
@@ -113,7 +115,9 @@ pub async fn update_provider(
 
     db.update_provider(&provider).map_err(|e| e.to_string())?;
 
-    let _ = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await;
+    if let Err(e) = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await {
+        tracing::warn!("Failed to reload proxy config after provider update: {}", e);
+    }
 
     tracing::info!(id = %provider.id, "Provider updated");
     Ok(provider)
@@ -133,7 +137,9 @@ pub async fn delete_provider(
     }
 
     db.delete_provider(&id).map_err(|e| e.to_string())?;
-    let _ = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await;
+    if let Err(e) = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await {
+        tracing::warn!("Failed to reload proxy config after provider delete: {}", e);
+    }
     Ok(true)
 }
 

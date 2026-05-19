@@ -44,23 +44,25 @@ impl WrapperService {
         let wrapper_dir = resolve_wrapper_dir(&settings.wrapper_dir)?;
         fs::create_dir_all(&wrapper_dir).map_err(|e| e.to_string())?;
 
-        #[cfg(windows)]
-        {
-            let profile_settings_dir = wrapper_dir.join("profiles");
-            fs::create_dir_all(&profile_settings_dir).map_err(|e| e.to_string())?;
-        }
+        let profile_settings_dir = wrapper_dir.join("profiles");
+        fs::create_dir_all(&profile_settings_dir).map_err(|e| e.to_string())?;
 
         let claude_path = resolve_claude_path(&settings).await;
         let artifacts = build_wrapper_artifacts(&wrapper_dir, &claude_path, &settings, profile)?;
 
         if let Some(settings_path) = &artifacts.settings_path {
             if let Some(settings_content) = &artifacts.settings_content {
-                fs::write(settings_path, settings_content).map_err(|e| e.to_string())?;
+                let tmp = settings_path.with_extension("tmp");
+                fs::write(&tmp, settings_content).map_err(|e| e.to_string())?;
+                fs::rename(&tmp, settings_path).map_err(|e| e.to_string())?;
             }
         }
 
-        fs::write(&artifacts.launcher_path, &artifacts.launcher_content)
-            .map_err(|e| e.to_string())?;
+        {
+            let tmp = artifacts.launcher_path.with_extension("tmp");
+            fs::write(&tmp, &artifacts.launcher_content).map_err(|e| e.to_string())?;
+            fs::rename(&tmp, &artifacts.launcher_path).map_err(|e| e.to_string())?;
+        }
 
         #[cfg(unix)]
         {
@@ -167,46 +169,28 @@ fn build_wrapper_artifacts(
     profile: &Profile,
 ) -> Result<WrapperArtifacts, String> {
     let launcher_path = wrapper_dir.join(wrapper_file_name(&profile.command_name));
+    let settings_path = wrapper_settings_path(wrapper_dir, &profile.command_name)
+        .ok_or_else(|| "Settings path could not be resolved".to_string())?;
+    let settings_content = build_profile_settings_content(
+        &settings.proxy_host,
+        settings.proxy_port,
+        &profile.route_path,
+        &settings.proxy_auth_token,
+        &profile.model,
+    )?;
 
     #[cfg(windows)]
-    {
-        let settings_path = wrapper_settings_path(wrapper_dir, &profile.command_name)
-            .ok_or_else(|| "Windows launcher settings path could not be resolved".to_string())?;
-        let settings_content = build_windows_profile_settings_content(
-            &settings.proxy_host,
-            settings.proxy_port,
-            &profile.route_path,
-            &settings.proxy_auth_token,
-            &profile.model,
-        )?;
-        let launcher_content = build_windows_wrapper_content(claude_path, &settings_path);
-
-        return Ok(WrapperArtifacts {
-            launcher_path,
-            launcher_content,
-            settings_path: Some(settings_path),
-            settings_content: Some(settings_content),
-        });
-    }
+    let launcher_content = build_windows_wrapper_content(claude_path, &settings_path);
 
     #[cfg(not(windows))]
-    {
-        let launcher_content = build_unix_wrapper_content(
-            &settings.proxy_host,
-            settings.proxy_port,
-            &profile.route_path,
-            &settings.proxy_auth_token,
-            claude_path,
-            &profile.model,
-        );
+    let launcher_content = build_unix_wrapper_content(claude_path, &settings_path);
 
-        Ok(WrapperArtifacts {
-            launcher_path,
-            launcher_content,
-            settings_path: None,
-            settings_content: None,
-        })
-    }
+    Ok(WrapperArtifacts {
+        launcher_path,
+        launcher_content,
+        settings_path: Some(settings_path),
+        settings_content: Some(settings_content),
+    })
 }
 
 fn artifact_contents_differ(path: &Path, expected_content: &str) -> bool {
@@ -231,30 +215,28 @@ fn settings_artifact_differs(path: Option<&Path>, expected_content: Option<&str>
     }
 }
 
+fn escape_shell_double_quote(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', "\\$")
+        .replace('`', "\\`")
+}
+
 #[cfg(not(windows))]
-fn build_unix_wrapper_content(
-    proxy_host: &str,
-    proxy_port: u16,
-    route_path: &str,
-    auth_token: &str,
-    claude_path: &str,
-    model: &str,
-) -> String {
+fn build_unix_wrapper_content(claude_path: &str, settings_path: &Path) -> String {
+    let settings_path = escape_shell_double_quote(&settings_path.to_string_lossy());
+    let claude_path = escape_shell_double_quote(claude_path);
     format!(
         r#"#!/usr/bin/env bash
 set -e
 
-CLAIR_BASE_URL="http://{proxy_host}:{proxy_port}{route_path}"
-CLAIR_TOKEN="{auth_token}"
 CLAUDE_BIN="{claude_path}"
-CLAIR_MODEL="{model}"
+CLAIR_SETTINGS="{settings_path}"
 
-export ANTHROPIC_BASE_URL="$CLAIR_BASE_URL"
-export ANTHROPIC_AUTH_TOKEN="$CLAIR_TOKEN"
-export ANTHROPIC_MODEL="$CLAIR_MODEL"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="$CLAIR_MODEL"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="$CLAIR_MODEL"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="$CLAIR_MODEL"
+if [ ! -f "$CLAIR_SETTINGS" ]; then
+    echo "Error: Clair profile settings not found: $CLAIR_SETTINGS" >&2
+    exit 1
+fi
 
 if ! command -v "$CLAUDE_BIN" &> /dev/null; then
     echo "Error: Claude binary not found: $CLAUDE_BIN" >&2
@@ -262,19 +244,14 @@ if ! command -v "$CLAUDE_BIN" &> /dev/null; then
     exit 1
 fi
 
-exec "$CLAUDE_BIN" "$@"
+exec "$CLAUDE_BIN" --settings "$CLAIR_SETTINGS" "$@"
 "#,
-        proxy_host = proxy_host,
-        proxy_port = proxy_port,
-        route_path = route_path,
-        auth_token = auth_token,
         claude_path = claude_path,
-        model = model
+        settings_path = settings_path
     )
 }
 
-#[cfg(windows)]
-fn build_windows_profile_settings_content(
+fn build_profile_settings_content(
     proxy_host: &str,
     proxy_port: u16,
     route_path: &str,
@@ -297,8 +274,15 @@ fn build_windows_profile_settings_content(
 }
 
 #[cfg(windows)]
+fn escape_batch_value(s: &str) -> String {
+    s.replace('"', "")
+        .replace('%', "%%")
+}
+
+#[cfg(windows)]
 fn build_windows_wrapper_content(claude_path: &str, settings_path: &Path) -> String {
-    let settings_path = settings_path.to_string_lossy();
+    let settings_path = escape_batch_value(&settings_path.to_string_lossy());
+    let claude_path = escape_batch_value(claude_path);
     format!(
         r#"@echo off
 setlocal
@@ -337,21 +321,11 @@ call "%CLAUDE_BIN%" --settings "%CLAIR_SETTINGS%" %*
 }
 
 fn wrapper_settings_path(wrapper_dir: &Path, command_name: &str) -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        Some(
-            wrapper_dir
-                .join("profiles")
-                .join(format!("{command_name}.settings.json")),
-        )
-    }
-
-    #[cfg(not(windows))]
-    {
-        let _ = wrapper_dir;
-        let _ = command_name;
-        None
-    }
+    Some(
+        wrapper_dir
+            .join("profiles")
+            .join(format!("{command_name}.settings.json")),
+    )
 }
 
 fn resolve_wrapper_dir(wrapper_dir: &str) -> Result<PathBuf, String> {
@@ -472,36 +446,15 @@ fn check_command_in_path(command_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_windows_profile_settings_content, build_windows_wrapper_content,
-        normalize_path_for_compare, paths_match, wrapper_settings_path,
-    };
+    use super::{build_profile_settings_content, normalize_path_for_compare, paths_match, wrapper_settings_path};
     use std::path::Path;
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_settings_file_points_to_local_proxy_and_model() {
-        let content = build_windows_profile_settings_content(
-            "127.0.0.1",
-            28789,
-            "/glm",
-            "clair-local-token",
-            "MiniMax-M2.7",
-        )
-        .unwrap();
-
-        assert!(content.contains("\"ANTHROPIC_BASE_URL\": \"http://127.0.0.1:28789/glm\""));
-        assert!(content.contains("\"ANTHROPIC_AUTH_TOKEN\": \"clair-local-token\""));
-        assert!(content.contains("\"ANTHROPIC_MODEL\": \"MiniMax-M2.7\""));
-        assert!(content.contains("\"ANTHROPIC_DEFAULT_SONNET_MODEL\": \"MiniMax-M2.7\""));
-    }
 
     #[cfg(windows)]
     #[test]
     fn windows_wrapper_uses_settings_override_file() {
         let settings_path =
             wrapper_settings_path(Path::new("C:\\Clair\\bin"), "claude-glm").unwrap();
-        let content = build_windows_wrapper_content("claude.exe", &settings_path);
+        let content = super::build_windows_wrapper_content("claude.exe", &settings_path);
 
         assert!(content.contains("call \"%CLAUDE_BIN%\" --settings \"%CLAIR_SETTINGS%\" %*"));
         assert!(content
@@ -510,8 +463,42 @@ mod tests {
         assert!(content.contains("set \"ANTHROPIC_AUTH_TOKEN=\""));
     }
 
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_wrapper_uses_settings_flag() {
+        let settings_path = wrapper_settings_path(Path::new("/home/user/.local/bin"), "claude-glm").unwrap();
+        let content = super::build_unix_wrapper_content("/usr/local/bin/claude", &settings_path);
+
+        assert!(content.contains("exec \"$CLAUDE_BIN\" --settings \"$CLAIR_SETTINGS\" \"$@\""));
+        assert!(content.contains("CLAIR_SETTINGS=\"/home/user/.local/bin/profiles/claude-glm.settings.json\""));
+        assert!(content.contains("CLAUDE_BIN=\"/usr/local/bin/claude\""));
+    }
+
+    #[test]
+    fn settings_json_contains_env_vars() {
+        let content = build_profile_settings_content(
+            "127.0.0.1",
+            28789,
+            "/glm",
+            "clair-local-token",
+            "glm-4.7",
+        ).unwrap();
+
+        assert!(content.contains("\"ANTHROPIC_BASE_URL\": \"http://127.0.0.1:28789/glm\""));
+        assert!(content.contains("\"ANTHROPIC_AUTH_TOKEN\": \"clair-local-token\""));
+        assert!(content.contains("\"ANTHROPIC_MODEL\": \"glm-4.7\""));
+        assert!(content.contains("\"ANTHROPIC_DEFAULT_SONNET_MODEL\": \"glm-4.7\""));
+        assert!(content.contains("\"ANTHROPIC_DEFAULT_OPUS_MODEL\": \"glm-4.7\""));
+        assert!(content.contains("\"ANTHROPIC_DEFAULT_HAIKU_MODEL\": \"glm-4.7\""));
+    }
+
     #[test]
     fn path_comparison_ignores_trailing_separators() {
+        assert!(paths_match("/home/user/bin/", "/home/user/bin"));
+        assert_eq!(
+            normalize_path_for_compare("/home/user/bin/"),
+            normalize_path_for_compare("/home/user/bin")
+        );
         assert!(paths_match("C:\\Users\\me\\bin\\", "C:\\Users\\me\\bin"));
         assert_eq!(
             normalize_path_for_compare("C:\\Users\\me\\bin/"),

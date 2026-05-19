@@ -91,7 +91,6 @@ function convertProfileFromBackend(p: Record<string, unknown>): Profile {
     commandName: p.command_name as string,
     isDefault: p.is_default as boolean,
     wrapperEnabled: p.wrapper_enabled as boolean,
-    wrapperPath: p.wrapper_path as string | undefined,
     createdAt: p.created_at as string,
     updatedAt: p.updated_at as string,
   }
@@ -214,7 +213,6 @@ export async function createProvider(input: CreateProviderInput): Promise<Provid
       enable_streaming: input.enableStreaming,
       notes: input.notes,
     }
-    console.log('[createProvider] input:', payload)
     const result = await invoke<Record<string, unknown>>('create_provider', { input: payload })
     return convertProviderFromBackend(result)
   } catch (error) {
@@ -235,7 +233,6 @@ export async function updateProvider(input: UpdateProviderInput): Promise<Provid
     if (input.enableStreaming !== undefined) payload.enable_streaming = input.enableStreaming
     if (input.notes !== undefined) payload.notes = input.notes
     if (input.status !== undefined) payload.status = input.status
-    console.log('[updateProvider] input:', payload)
     const result = await invoke<Record<string, unknown>>('update_provider', { input: payload })
     return convertProviderFromBackend(result)
   } catch (error) {
@@ -324,7 +321,6 @@ export async function createProfile(input: CreateProfileInput): Promise<Profile>
       is_default: input.isDefault,
       wrapper_enabled: input.wrapperEnabled,
     }
-    console.log('[createProfile] input:', payload)
     const result = await invoke<Record<string, unknown>>('create_profile', { input: payload })
     return convertProfileFromBackend(result)
   } catch (error) {
@@ -343,7 +339,6 @@ export async function updateProfile(input: UpdateProfileInput): Promise<Profile>
     if (input.commandName !== undefined) payload.command_name = input.commandName
     if (input.isDefault !== undefined) payload.is_default = input.isDefault
     if (input.wrapperEnabled !== undefined) payload.wrapper_enabled = input.wrapperEnabled
-    console.log('[updateProfile] input:', payload)
     const result = await invoke<Record<string, unknown>>('update_profile', { input: payload })
     return convertProfileFromBackend(result)
   } catch (error) {
@@ -357,16 +352,6 @@ export async function deleteProfile(id: string): Promise<boolean> {
     return await invoke<boolean>('delete_profile', { id })
   } catch (error) {
     console.error('[deleteProfile] error:', error)
-    throw error
-  }
-}
-
-export async function setDefaultProfile(id: string): Promise<Profile> {
-  try {
-    const result = await invoke<Record<string, unknown>>('set_default_profile', { id })
-    return convertProfileFromBackend(result)
-  } catch (error) {
-    console.error('[setDefaultProfile] error:', error)
     throw error
   }
 }
@@ -395,11 +380,6 @@ export async function startProxy(): Promise<ProxyStatus> {
 
 export async function stopProxy(): Promise<ProxyStatus> {
   const result = await invoke<Record<string, unknown>>('stop_proxy')
-  return convertProxyStatusFromBackend(result)
-}
-
-export async function restartProxy(): Promise<ProxyStatus> {
-  const result = await invoke<Record<string, unknown>>('restart_proxy')
   return convertProxyStatusFromBackend(result)
 }
 
@@ -439,11 +419,6 @@ export async function generateWrapper(profileId: string): Promise<GenerateWrappe
     profileId,
   })
   return convertGenerateWrapperResultFromBackend(result)
-}
-
-export async function generateAllWrappers(): Promise<GenerateWrapperResult[]> {
-  const result = await invoke<Record<string, unknown>[]>('generate_all_wrappers')
-  return result.map(convertGenerateWrapperResultFromBackend)
 }
 
 export async function checkWrapperStatus(profileId: string): Promise<WrapperStatus> {

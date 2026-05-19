@@ -4,7 +4,6 @@ mod domain;
 mod proxy;
 mod security;
 mod services;
-mod utils;
 
 use db::Database;
 use std::path::PathBuf;

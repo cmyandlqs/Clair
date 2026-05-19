@@ -18,13 +18,11 @@ export const providerSchema = z.object({
   notes: z.string().max(500).optional(),
 })
 
-export const updateProviderSchema = providerSchema.partial()
-
 export type ProviderFormData = z.infer<typeof providerSchema>
 
-export const RESERVED_ROUTES = ['/health', '/status', '/api', '/admin', '/logs']
+const RESERVED_ROUTES = ['/health', '/status', '/api', '/admin', '/logs']
 
-export const DANGEROUS_COMMANDS = [
+const DANGEROUS_COMMANDS = [
   'bash', 'sh', 'sudo', 'rm', 'cp', 'mv', 'python', 'node', 'npm',
   'git', 'docker', 'kubectl', 'aws', 'gcloud', 'cargo', 'go', 'java'
 ]
@@ -48,7 +46,5 @@ export const profileSchema = z.object({
   isDefault: z.boolean().default(false),
   wrapperEnabled: z.boolean().default(true),
 })
-
-export const updateProfileSchema = profileSchema.partial()
 
 export type ProfileFormData = z.infer<typeof profileSchema>

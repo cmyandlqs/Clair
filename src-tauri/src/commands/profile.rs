@@ -1,4 +1,4 @@
-use crate::commands::proxy::ProxyState;
+use crate::commands::proxy::{lock_safe, ProxyState};
 use crate::db::Database;
 use crate::domain::Profile;
 use crate::proxy::server::{recent_evidence, ProxyEvidenceEntry};
@@ -73,7 +73,6 @@ pub async fn create_profile(
         command_name: input.command_name,
         is_default: input.is_default,
         wrapper_enabled: input.wrapper_enabled,
-        wrapper_path: None,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -90,7 +89,9 @@ pub async fn create_profile(
         }
     })?;
 
-    let _ = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await;
+    if let Err(e) = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await {
+        tracing::warn!("Failed to reload proxy config after profile create: {}", e);
+    }
 
     Ok(profile)
 }
@@ -114,7 +115,6 @@ pub async fn update_profile(
         profile.route_path = route_path;
     }
     if let Some(provider_id) = input.provider_id {
-        // Verify provider exists
         db.get_provider(&provider_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "Provider not found".to_string())?;
@@ -145,7 +145,9 @@ pub async fn update_profile(
         }
     })?;
 
-    let _ = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await;
+    if let Err(e) = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await {
+        tracing::warn!("Failed to reload proxy config after profile update: {}", e);
+    }
 
     Ok(profile)
 }
@@ -157,7 +159,9 @@ pub async fn delete_profile(
     id: String,
 ) -> Result<bool, String> {
     db.delete_profile(&id).map_err(|e| e.to_string())?;
-    let _ = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await;
+    if let Err(e) = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await {
+        tracing::warn!("Failed to reload proxy config after profile delete: {}", e);
+    }
     Ok(true)
 }
 
@@ -171,7 +175,9 @@ pub async fn set_default_profile(
         return Err("Profile not found".to_string());
     }
 
-    let _ = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await;
+    if let Err(e) = super::proxy::reload_proxy_config_if_running(&proxy_state, &db).await {
+        tracing::warn!("Failed to reload proxy config after set default: {}", e);
+    }
 
     db.get_profile(&id)
         .map_err(|e| e.to_string())?
@@ -211,7 +217,7 @@ pub async fn test_profile(
     let provider_name = provider.name.clone();
 
     let is_running = {
-        let guard = proxy_state.server.lock().unwrap();
+        let guard = lock_safe(&proxy_state.server);
         guard.is_some()
     };
 
@@ -258,7 +264,7 @@ pub async fn test_profile(
     let latency_ms = start.elapsed().as_millis() as u64;
 
     let evidence_store = {
-        let guard = proxy_state.evidence.lock().unwrap();
+        let guard = lock_safe(&proxy_state.evidence);
         guard.clone()
     };
 

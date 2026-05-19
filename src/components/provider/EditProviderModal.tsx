@@ -19,6 +19,7 @@ export function EditProviderModal({ onClose, providerId }: EditProviderModalProp
   const provider = providers.find((p) => p.id === providerId)
 
   const [testResult, setTestResult] = useState<string | null>(null)
+  const [testSucceeded, setTestSucceeded] = useState<boolean | null>(null)
   const [isTesting, setIsTesting] = useState(false)
 
   const updateProvider = useUpdateProvider()
@@ -30,7 +31,6 @@ export function EditProviderModal({ onClose, providerId }: EditProviderModalProp
     register,
     handleSubmit,
     formState: { errors },
-    getValues,
     reset,
     trigger,
   } = useForm<ProviderFormData>({
@@ -82,12 +82,12 @@ export function EditProviderModal({ onClose, providerId }: EditProviderModalProp
 
     setIsTesting(true)
     setTestResult(null)
+    setTestSucceeded(null)
 
     try {
-      const data = getValues()
-      await updateProvider.mutateAsync({ id: providerId, ...data })
       const result = await testProvider.mutateAsync(providerId)
 
+      setTestSucceeded(result.ok)
       setTestResult(
         result.ok
           ? t('provider.connected', { latency: String(result.latencyMs ?? '?'), model: result.model ?? '' })
@@ -100,6 +100,7 @@ export function EditProviderModal({ onClose, providerId }: EditProviderModalProp
         addToast('error', `${t('provider.connectionFailed')}: ${result.message}`)
       }
     } catch {
+      setTestSucceeded(false)
       setTestResult(t('error.connectionFailed'))
       addToast('error', t('error.connectionFailed'))
     } finally {
@@ -190,7 +191,7 @@ export function EditProviderModal({ onClose, providerId }: EditProviderModalProp
             {testResult && (
               <div
                 className={`p-3 rounded-lg text-sm ${
-                  testResult.startsWith(t('provider.connected').substring(0, 5))
+                  testSucceeded
                     ? 'bg-[var(--success)]/10 text-[var(--success)]'
                     : 'bg-[var(--error)]/10 text-[var(--error)]'
                 }`}

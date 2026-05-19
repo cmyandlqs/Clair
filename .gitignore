@@ -38,3 +38,6 @@ Thumbs.db
 *.exe
 *.dmg
 *.msi
+# Temp
+app-icon.png
+UI参考/
