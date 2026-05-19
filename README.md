@@ -1,24 +1,24 @@
 # Clair
 
-**Local Claude Provider Gateway** — 并行运行多个 Claude Code Provider 的本地网关。
+**Local Claude Provider Gateway** — Run multiple Claude Code instances with different providers in parallel.
 
-[English](./README.en.md)
+[中文文档](./README.zh.md)
 
 ---
 
-## 它是什么
+## What It Does
 
-Clair 让你用不同命令同时启动不同 Provider 的 Claude Code 实例，互不干扰：
+Clair lets you launch multiple Claude Code instances with different providers simultaneously, each isolated from the others:
 
 ```bash
-终端 A：claude-glm       → GLM (智谱)
-终端 B：claude-minimax   → MiniMax
-终端 C：claude-deepseek  → DeepSeek
+Terminal A: claude-glm       → GLM (Zhipu)
+Terminal B: claude-minimax   → MiniMax
+Terminal C: claude-deepseek  → DeepSeek
 ```
 
-每个命令对应一个 Profile，通过本地代理路由到对应 API Provider，自动替换模型和认证。
+Each command corresponds to a Profile that routes through a local proxy to the designated API Provider, automatically rewriting model names and auth headers.
 
-## 工作原理
+## How It Works
 
 ```
 ┌──────────────┐     ┌──────────────────────────┐     ┌──────────────┐
@@ -26,31 +26,31 @@ Clair 让你用不同命令同时启动不同 Provider 的 Claude Code 实例，
 ├──────────────┤     │  Clair Local Proxy        │     ├──────────────┤
 │claude-minimax│────▶│  127.0.0.1:28789          │────▶│  MiniMax API  │
 ├──────────────┤     │                          │     ├──────────────┤
-│claude-default│────▶│  路由: Profile → Provider  │────▶│  Claude API   │
+│claude-default│────▶│  Route: Profile → Provider│────▶│  Claude API  │
 └──────────────┘     └──────────────────────────┘     └──────────────┘
 ```
 
-1. **Provider** — 配置 API 厂商信息（Base URL、API Key、认证方式、默认模型）
-2. **Profile** — 定义路由规则（路径、命令名、模型覆盖）并绑定到某个 Provider
-3. **Wrapper 脚本** — 生成 `~/.local/bin/claude-xxx` 可执行脚本，通过 `--settings` 文件注入配置
-4. **本地代理** — 监听 `127.0.0.1:28789`，根据请求路径路由到对应 Provider
+1. **Provider** — Configure API vendor info (Base URL, API Key, auth scheme, default model)
+2. **Profile** — Define routing rules (path, command name, model override) bound to a Provider
+3. **Wrapper Script** — Generates `~/.local/bin/claude-xxx` executable scripts that inject config via `--settings` files
+4. **Local Proxy** — Listens on `127.0.0.1:28789`, routes requests by path to the corresponding Provider
 
-## 功能特性
+## Features
 
-- **Provider 管理** — 添加、编辑、测试 API Provider（Anthropic-compatible / OpenAI-compatible / Custom）
-- **Profile 管理** — 为每个 Provider 创建多个路由配置，自定义命令名和模型
-- **本地 HTTP 代理** — 透明转发请求，自动处理认证头替换和模型覆盖
-- **Wrapper 脚本生成** — 一键生成 `claude-xxx` 命令脚本 + per-profile settings 文件
-- **路由测试** — 端到端测试 Profile 路由，查看完整的请求证据链
-- **SSE 流式响应** — 支持流式输出透传
-- **国际化** — 支持简体中文和英文
-- **连接测试** — 测试 Provider 连通性并显示延迟
+- **Provider Management** — Add, edit, test API Providers (Anthropic-compatible / OpenAI-compatible / Custom)
+- **Profile Management** — Create multiple routing configs per Provider with custom command names and models
+- **Local HTTP Proxy** — Transparent forwarding with automatic auth header replacement and model rewriting
+- **Wrapper Script Generation** — One-click generation of `claude-xxx` command scripts + per-profile settings files
+- **Route Testing** — End-to-end profile route testing with full request evidence chain
+- **SSE Streaming** — Stream response pass-through support
+- **i18n** — Simplified Chinese and English
+- **Connection Testing** — Test Provider connectivity with latency display
 
-## 安装
+## Installation
 
 ### Linux (deb)
 
-从 [Releases](https://github.com/cmyandlqs/Clair/releases) 下载最新 `.deb` 文件：
+Download the latest `.deb` from [Releases](https://github.com/cmyandlqs/Clair/releases):
 
 ```bash
 sudo dpkg -i Clair_0.1.0_amd64.deb
@@ -58,113 +58,113 @@ sudo dpkg -i Clair_0.1.0_amd64.deb
 
 ### Linux (AppImage)
 
-从 [Releases](https://github.com/cmyandlqs/Clair/releases) 下载最新 `.AppImage` 文件：
+Download the latest `.AppImage` from [Releases](https://github.com/cmyandlqs/Clair/releases):
 
 ```bash
 chmod +x Clair_0.1.0_amd64.AppImage
 ./Clair_0.1.0_amd64.AppImage
 ```
 
-## 使用流程
+## Usage
 
-### 1. 创建 Provider
+### 1. Create a Provider
 
-点击 **+ Add Provider**，填写 API 厂商信息：
+Click **+ Add Provider** and fill in the API vendor details:
 
-| 字段 | 说明 | 示例 |
-|------|------|------|
-| Name | Provider 名称 | `GLM` |
-| Type | API 兼容类型 | `Anthropic-compatible` |
-| Base URL | API 地址 | `https://open.bigmodel.cn/api/paas/v4` |
-| API Key | 认证密钥 | `your-api-key` |
-| Auth Scheme | 认证方式 | `x-api-key` 或 `Bearer` |
-| Default Model | 默认模型 | `glm-4` |
+| Field | Description | Example |
+|-------|-------------|---------|
+| Name | Provider name | `GLM` |
+| Type | API compatibility type | `Anthropic-compatible` |
+| Base URL | API endpoint | `https://open.bigmodel.cn/api/paas/v4` |
+| API Key | Authentication key | `your-api-key` |
+| Auth Scheme | Auth method | `x-api-key` or `Bearer` |
+| Default Model | Default model | `glm-4` |
 
-### 2. 测试连接
+### 2. Test Connection
 
-点击 **Test Connection**，确认连接成功后状态变为 **Ready**。
+Click **Test Connection**. Status changes to **Ready** on success.
 
-### 3. 创建 Profile
+### 3. Create a Profile
 
-| 字段 | 说明 | 示例 |
-|------|------|------|
-| Name | Profile 名称 | `GLM` |
-| Provider | 绑定的 Provider | `GLM` |
-| Route Path | 代理路由路径 | `/glm` |
-| Command Name | 生成的命令名 | `claude-glm` |
-| Model | 使用的模型 | `glm-4` |
+| Field | Description | Example |
+|-------|-------------|---------|
+| Name | Profile name | `GLM` |
+| Provider | Bound Provider | `GLM` |
+| Route Path | Proxy route path | `/glm` |
+| Command Name | Generated command name | `claude-glm` |
+| Model | Model to use | `glm-4` |
 
-### 4. 生成 Wrapper 脚本
+### 4. Generate Wrapper Script
 
-选中 Profile 后，点击 **Regenerate Wrapper**，将生成：
+Select a Profile and click **Regenerate Wrapper**. This generates:
 
-- `~/.local/bin/claude-glm` — 启动脚本
-- `~/.local/bin/profiles/claude-glm.settings.json` — Profile 配置文件
+- `~/.local/bin/claude-glm` — Launcher script
+- `~/.local/bin/profiles/claude-glm.settings.json` — Profile config file
 
-### 5. 启动代理
+### 5. Start Proxy
 
-点击 **Start** 启动本地代理。状态指示灯变绿表示代理运行中。
+Click **Start** to launch the local proxy. The status indicator turns green when running.
 
-### 6. 使用
+### 6. Use
 
 ```bash
-claude-glm       # 启动 GLM 版 Claude Code
-claude-minimax   # 启动 MiniMax 版
+claude-glm       # Launch Claude Code with GLM provider
+claude-minimax   # Launch Claude Code with MiniMax provider
 ```
 
-## 数据存储
+## Data Storage
 
-| 文件 | 说明 |
-|------|------|
-| `~/.config/clair/clair.db` | SQLite 配置数据库 |
-| `~/.local/bin/claude-*` | Wrapper 启动脚本 |
-| `~/.local/bin/profiles/*.settings.json` | Profile 配置文件 |
+| File | Description |
+|------|-------------|
+| `~/.config/clair/clair.db` | SQLite configuration database |
+| `~/.local/bin/claude-*` | Wrapper launcher scripts |
+| `~/.local/bin/profiles/*.settings.json` | Profile config files |
 
-## 安全说明
+## Security
 
-- 代理默认监听 `127.0.0.1`（仅本地访问）
-- API Key 日志自动脱敏：`sk-****abcd`
-- 认证 Token 使用 128-bit UUID
-- Wrapper 脚本中的路径经过 Shell 转义防注入
-- Settings 修改 host/port/token 后自动重启代理
-- 删除 Provider 时检查 Profile 引用，防止误删
+- Proxy listens on `127.0.0.1` only (localhost, no network exposure)
+- API keys automatically masked in logs: `sk-****abcd`
+- Auth tokens use 128-bit UUIDs
+- Wrapper script paths are shell-escaped to prevent injection
+- Proxy auto-restarts on host/port/token changes
+- Provider deletion blocked if referenced by Profiles
 
-## 技术栈
+## Tech Stack
 
-| 层级 | 技术 |
-|------|------|
-| 桌面框架 | Tauri 2 |
-| 前端 | React 18 + TypeScript + Vite |
-| 样式 | Tailwind CSS + Framer Motion |
-| 状态管理 | TanStack Query + Zustand |
-| 后端 | Rust + Axum + SQLite |
-| HTTP 代理 | Rust Axum |
+| Layer | Technology |
+|-------|------------|
+| Desktop Framework | Tauri 2 |
+| Frontend | React 18 + TypeScript + Vite |
+| Styling | Tailwind CSS + Framer Motion |
+| State Management | TanStack Query + Zustand |
+| Backend | Rust + Axum + SQLite |
+| HTTP Proxy | Rust Axum |
 
-## 开发
+## Development
 
-### 环境要求
+### Prerequisites
 
 - Node.js 18+
 - Rust 1.75+ (via [rustup](https://rustup.rs))
 - [Tauri 2 CLI](https://v2.tauri.app/start/prerequisites/)
 
-### 常用命令
+### Commands
 
 ```bash
-npm install              # 安装前端依赖
-npm run dev              # Vite 开发服务器
-npm run build            # 前端生产构建
-cargo check              # Rust 类型检查
-cargo test               # 运行测试 (23 tests)
-cargo tauri dev          # 开发模式（热重载）
-cargo tauri build        # 生产打包 (.deb + .AppImage)
+npm install              # Install frontend dependencies
+npm run dev              # Vite dev server
+npm run build            # Frontend production build
+cargo check              # Rust type check
+cargo test               # Run tests (23 tests)
+cargo tauri dev          # Dev mode (hot reload)
+cargo tauri build        # Production build (.deb + .AppImage)
 ```
 
-## 项目结构
+## Project Structure
 
 ```
 clair/
-├── src/                        # 前端 React 代码
+├── src/                        # Frontend React code
 │   ├── components/
 │   │   ├── layout/             # TopBar, Sidebar, MainLayout, DetailPanel
 │   │   ├── provider/           # ProviderList, AddProviderModal, EditProviderModal
@@ -174,20 +174,20 @@ clair/
 │   ├── hooks/                  # useProviders, useProfiles, useProxyStatus, useUIStore
 │   ├── lib/                    # api.ts, types.ts, validators.ts, i18n.tsx
 │   └── styles/                 # globals.css
-├── src-tauri/                  # Rust 后端
+├── src-tauri/                  # Rust backend
 │   └── src/
-│       ├── commands/           # Tauri 命令处理
+│       ├── commands/           # Tauri command handlers
 │       ├── domain/             # Provider, Profile, AppSettings
-│       ├── db/                 # SQLite 操作 + 迁移
-│       ├── proxy/              # HTTP 代理 (Axum)
+│       ├── db/                 # SQLite operations + migrations
+│       ├── proxy/              # HTTP proxy (Axum)
 │       ├── services/           # wrapper_service, provider_service, settings_service
-│       └── security/           # API Key 脱敏、认证校验
-├── doc/                        # 文档
-│   ├── prd.md                  # 产品需求文档
-│   ├── frontend-dev.md         # 前端开发规范
-│   ├── backend-dev.md          # 后端开发指南
-│   └── test.md                 # 测试用例
-└── CLAUDE.md                   # Claude Code 开发指南
+│       └── security/           # API key masking, auth validation
+├── doc/                        # Documentation
+│   ├── prd.md                  # Product requirements
+│   ├── frontend-dev.md         # Frontend development guide
+│   ├── backend-dev.md          # Backend development guide
+│   └── test.md                 # Test cases & acceptance criteria
+└── CLAUDE.md                   # Claude Code development guide
 ```
 
 ## License
