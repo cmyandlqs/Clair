@@ -1,22 +1,20 @@
-# Clair
-
-**Local Claude Provider Gateway** — Run multiple Claude Code instances with different providers in parallel.
+# Clair — Run Claude Code with different providers at the same time
 
 [中文文档](./README.zh.md)
 
 ---
 
-## What It Does
+## Why Clair
 
-Clair lets you launch multiple Claude Code instances with different providers simultaneously, each isolated from the others:
+Tools like ccswitch let you **switch** between Claude Code configurations, but only one at a time. If you have token plans from multiple providers (Anthropic, GLM, MiniMax, DeepSeek...), you can't use them **simultaneously**.
+
+Clair solves this. Each `claude-xxx` command is an independent entry point that routes to a different provider through a local proxy — so you can open multiple terminals and run them side by side, without interference.
 
 ```bash
 Terminal A: claude-glm       → GLM (Zhipu)
 Terminal B: claude-minimax   → MiniMax
 Terminal C: claude-deepseek  → DeepSeek
 ```
-
-Each command corresponds to a Profile that routes through a local proxy to the designated API Provider, automatically rewriting model names and auth headers.
 
 ## How It Works
 

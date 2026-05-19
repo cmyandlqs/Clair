@@ -1,22 +1,20 @@
-# Clair
-
-**Local Claude Provider Gateway** — 并行运行多个 Claude Code Provider 的本地网关。
+# Clair — 同时用不同 Provider 运行 Claude Code
 
 [English](./README.md)
 
 ---
 
-## 它是什么
+## 为什么做 Clair
 
-Clair 让你用不同命令同时启动不同 Provider 的 Claude Code 实例，互不干扰：
+ccswitch 这类工具可以让你在多个 Claude Code 配置之间**切换**，但同一时间只能用一个。如果你买了多个厂商的 token plan（Anthropic、智谱、MiniMax、DeepSeek……），没法**同时**使用它们。
+
+Clair 解决了这个问题。每个 `claude-xxx` 命令是一个独立入口，通过本地代理路由到不同 Provider——你可以同时打开多个终端并行使用，互不干扰。
 
 ```bash
 终端 A：claude-glm       → GLM (智谱)
 终端 B：claude-minimax   → MiniMax
 终端 C：claude-deepseek  → DeepSeek
 ```
-
-每个命令对应一个 Profile，通过本地代理路由到对应 API Provider，自动替换模型和认证。
 
 ## 工作原理
 
